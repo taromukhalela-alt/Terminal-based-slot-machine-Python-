@@ -242,6 +242,28 @@ input {
   margin-top: 24px;
 }
 
+.machine-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.play-money-note {
+  margin: 18px 0 0;
+  max-width: 64ch;
+  color: #425466;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.machine-spin-button {
+  width: auto;
+  min-width: 180px;
+  flex-shrink: 0;
+}
+
 .reel {
   position: relative;
   padding: var(--reel-padding);
@@ -948,6 +970,15 @@ textarea:focus {
     grid-template-columns: 1fr;
   }
 
+  .machine-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .machine-spin-button {
+    width: 100%;
+  }
+
   .reel {
     --symbol-height: 100px;
   }
@@ -1008,6 +1039,10 @@ textarea:focus {
   .profile-panel,
   .creator-panel {
     padding: 18px;
+  }
+
+  .play-money-note {
+    font-size: 0.92rem;
   }
 
   .profile-banner {
