@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profile | Pixel Slot Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero hero--compact">
+        <nav class="topbar">
+          <a class="brandmark" href="/">Pixel Slot Studio</a>
+          <div class="topbar__links">
+            <a class="topbar__link" href="/">Game</a>
+            <a class="topbar__link topbar__link--active" href="/profile">Profile</a>
+            <a class="topbar__link" href="/leaderboard">Leaderboard</a>
+            <a class="topbar__link" href="/creator">Creator</a>
+          </div>
+        </nav>
+
+        <div class="hero__copy">
+          <p class="eyebrow">Player profile</p>
+          <h1>Build a profile that looks earned, not generic.</h1>
+          <p class="hero__text">
+            Edit your identity, show off badges, upload your own visuals, and unlock elite cosmetics when you crack the top 10.
+          </p>
+        </div>
+        <div class="hero__orbs" aria-hidden="true">
+          <span class="orb orb--blue"></span>
+          <span class="orb orb--green"></span>
+          <span class="orb orb--peach"></span>
+        </div>
+      </header>
+
+      <main class="profile-layout">
+        <section class="panel profile-showcase">
+          <div class="profile-banner banner-theme-aurora" id="profile-banner">
+            <div class="profile-banner__overlay"></div>
+            <div class="profile-card skin-theme-skyline" id="profile-card">
+              <div class="profile-avatar avatar-theme-orbit" id="profile-avatar">
+                <img id="profile-avatar-image" class="profile-avatar__image is-hidden" alt="Profile avatar" />
+                <span id="profile-avatar-initials">PS</span>
+              </div>
+              <div class="profile-copy">
+                <p class="panel__eyebrow">Live profile</p>
+                <h2 id="profile-display-name">Pixel Spinner</h2>
+                <p class="profile-copy__handle" id="profile-username">@guest</p>
+                <p class="profile-copy__bio" id="profile-bio">Sign in to build your player card.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-meta-grid">
+            <article class="stat-card">
+              <span class="stat-card__label">Top spin rank</span>
+              <strong id="rank-top-spin">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Frequent winner rank</span>
+              <strong id="rank-frequency">-</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Account days</span>
+              <strong id="account-days">0</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Hit rate</span>
+              <strong id="profile-hit-rate">0%</strong>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel profile-panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Profile studio</p>
+              <h2>Edit your profile</h2>
+              <p class="panel__subtext">Profile badges and ranking unlocks are calculated on the server after every spin.</p>
+            </div>
+            <div class="status-pill" id="profile-status">Loading profile...</div>
+          </div>
+
+          <form id="profile-form" class="profile-form">
+            <div class="profile-edit-grid">
+              <label class="field">
+                <span>Display name</span>
+                <input id="display-name-input" type="text" maxlength="32" />
+              </label>
+              <label class="field">
+                <span>Bio</span>
+                <textarea id="bio-input" rows="4" maxlength="240"></textarea>
+              </label>
+            </div>
+
+            <div class="upload-grid">
+              <label class="field">
+                <span>Upload avatar</span>
+                <input id="avatar-upload-input" type="file" accept="image/png,image/jpeg,image/webp" />
+                <small class="field__hint">PNG, JPG, or WEBP. Max 2MB.</small>
+              </label>
+              <label class="field">
+                <span>Upload banner</span>
+                <input id="banner-upload-input" type="file" accept="image/png,image/jpeg,image/webp" />
+                <small class="field__hint">PNG, JPG, or WEBP. Max 2MB.</small>
+              </label>
+            </div>
+
+            <div class="profile-action-row">
+              <button id="clear-avatar-button" class="button button--ghost" type="button">Remove avatar upload</button>
+              <button id="clear-banner-button" class="button button--ghost" type="button">Remove banner upload</button>
+              <button class="button button--primary" type="submit">Save profile</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel profile-panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Badges</p>
+              <h2>Luck, grind, and leaderboard status</h2>
+            </div>
+          </div>
+          <div id="badge-grid" class="badge-grid"></div>
+        </section>
+
+        <section class="panel profile-panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Cosmetics</p>
+              <h2>Skins, banners, and profile pics</h2>
+              <p class="panel__subtext">Top 10 players unlock elite cosmetics automatically. Custom uploads always take priority when enabled.</p>
+            </div>
+          </div>
+
+          <div class="cosmetic-section">
+            <div class="cosmetic-section__header">
+              <h3>Profile skins</h3>
+            </div>
+            <div id="skin-options" class="cosmetic-grid"></div>
+          </div>
+
+          <div class="cosmetic-section">
+            <div class="cosmetic-section__header">
+              <h3>Banners</h3>
+            </div>
+            <div id="banner-options" class="cosmetic-grid"></div>
+          </div>
+
+          <div class="cosmetic-section">
+            <div class="cosmetic-section__header">
+              <h3>Preset profile pics</h3>
+            </div>
+            <div id="avatar-options" class="cosmetic-grid"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/profile.js" defer></script>
+  </body>
+</html>

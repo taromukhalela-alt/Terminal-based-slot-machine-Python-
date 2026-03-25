@@ -9,11 +9,21 @@
   <body>
     <div class="app-shell">
       <header class="hero">
+        <nav class="topbar">
+          <a class="brandmark" href="/">Pixel Slot Studio</a>
+          <div class="topbar__links">
+            <a class="topbar__link topbar__link--active" href="/">Game</a>
+            <a class="topbar__link" href="/profile">Profile</a>
+            <a class="topbar__link" href="/leaderboard">Leaderboard</a>
+            <a class="topbar__link" href="/creator">Creator</a>
+          </div>
+        </nav>
+
         <div class="hero__copy">
-          <p class="eyebrow">Pixel-inspired slot machine</p>
-          <h1>Pixel Slot Studio</h1>
+          <p class="eyebrow">Authenticated slot challenge</p>
+          <h1>Spin, style your profile, and climb into the top 10.</h1>
           <p class="hero__text">
-            A playful local web app with soft surfaces, smooth reel motion, and instant round feedback.
+            Secure gameplay, profile cosmetics, server-side badges, and leaderboard tiers that track how wild your luck really gets.
           </p>
         </div>
         <div class="hero__orbs" aria-hidden="true">
@@ -28,9 +38,12 @@
           <div class="panel__header">
             <div>
               <p class="panel__eyebrow">Reels</p>
-              <h2>Spin for a line match</h2>
+              <h2>All 3 horizontal lines are live on every spin</h2>
+              <p class="panel__subtext">
+                Sign in to record spins, unlock badges, and push your profile into the leaderboard spotlight.
+              </p>
             </div>
-            <div class="status-pill" id="status-pill">Ready for a fresh spin.</div>
+            <div class="status-pill" id="status-pill">Loading your session...</div>
           </div>
 
           <div class="reels" id="reels"></div>
@@ -61,34 +74,83 @@
               <span class="stat-card__label">Spin total</span>
               <strong id="spin-total">R0</strong>
             </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Deposit tier</span>
+              <strong id="deposit-tier">Guest</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-card__label">Total deposited</span>
+              <strong id="total-deposit">R0</strong>
+            </article>
+          </section>
+
+          <section class="panel auth-panel">
+            <div class="panel__header compact">
+              <div>
+                <p class="panel__eyebrow">Account</p>
+                <h2 id="auth-title">Sign in to play</h2>
+              </div>
+            </div>
+
+            <div id="guest-auth" class="auth-stack">
+              <div class="segmented-control">
+                <button class="segment is-active" data-auth-mode="login" type="button">Login</button>
+                <button class="segment" data-auth-mode="register" type="button">Register</button>
+              </div>
+
+              <form id="auth-form" class="form-stack">
+                <label class="field">
+                  <span>Username</span>
+                  <input id="username-input" type="text" minlength="3" maxlength="24" autocomplete="username" />
+                </label>
+                <label class="field">
+                  <span>Password</span>
+                  <input
+                    id="password-input"
+                    type="password"
+                    minlength="8"
+                    autocomplete="current-password"
+                  />
+                </label>
+                <button id="auth-submit" class="button button--primary" type="submit">Login</button>
+              </form>
+            </div>
+
+            <div id="user-panel" class="account-summary is-hidden">
+              <div class="account-summary__row">
+                <span>Signed in as</span>
+                <strong id="username-display">-</strong>
+              </div>
+              <div class="account-summary__row">
+                <span>Leaderboard tier</span>
+                <strong id="tier-display">-</strong>
+              </div>
+              <div class="account-summary__row">
+                <span>Top 10 unlocks</span>
+                <strong id="top-ten-display">Locked</strong>
+              </div>
+              <a class="button button--soft button--block" href="/profile">Open profile</a>
+              <a class="button button--ghost button--block" href="/leaderboard">Open leaderboard</a>
+              <button id="logout-button" class="button button--ghost button--block" type="button">Logout</button>
+            </div>
           </section>
 
           <section class="panel controls-panel">
             <div class="panel__header compact">
               <div>
-                <p class="panel__eyebrow">Session setup</p>
-                <h2>Tune your round</h2>
+                <p class="panel__eyebrow">Game controls</p>
+                <h2>Fund and spin</h2>
               </div>
             </div>
 
             <label class="field">
-              <span>Deposit</span>
+              <span>Deposit amount</span>
               <div class="field__row">
-                <input id="deposit-input" type="number" min="1" step="1" value="250" />
-                <button id="deposit-button" class="button button--soft">Add funds</button>
+                <input id="deposit-input" type="number" min="1" max="3000" step="1" value="200" />
+                <button id="deposit-button" class="button button--soft" type="button">Add funds</button>
               </div>
+              <small class="field__hint">Single deposits are capped at R3000.</small>
             </label>
-
-            <div class="stepper-group">
-              <div class="stepper-labels">
-                <span>Lines</span>
-                <strong id="lines-value">3</strong>
-              </div>
-              <div class="stepper">
-                <button data-adjust="lines" data-delta="-1" aria-label="Decrease lines">-</button>
-                <button data-adjust="lines" data-delta="1" aria-label="Increase lines">+</button>
-              </div>
-            </div>
 
             <div class="stepper-group">
               <div class="stepper-labels">
@@ -96,12 +158,12 @@
                 <strong id="bet-value">10</strong>
               </div>
               <div class="stepper">
-                <button data-adjust="bet" data-delta="-1" aria-label="Decrease bet">-</button>
-                <button data-adjust="bet" data-delta="1" aria-label="Increase bet">+</button>
+                <button data-adjust="bet" data-delta="-1" aria-label="Decrease bet" type="button">-</button>
+                <button data-adjust="bet" data-delta="1" aria-label="Increase bet" type="button">+</button>
               </div>
             </div>
 
-            <button id="spin-button" class="button button--primary">Spin reels</button>
+            <button id="spin-button" class="button button--primary" type="button">Spin reels</button>
           </section>
         </aside>
       </main>
@@ -109,7 +171,9 @@
 
     <template id="reel-template">
       <div class="reel">
-        <div class="reel__symbols"></div>
+        <div class="reel__viewport">
+          <div class="reel__symbols"></div>
+        </div>
       </div>
     </template>
 

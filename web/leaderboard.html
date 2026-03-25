@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Leaderboard | Pixel Slot Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="hero hero--compact">
+        <nav class="topbar">
+          <a class="brandmark" href="/">Pixel Slot Studio</a>
+          <div class="topbar__links">
+            <a class="topbar__link" href="/">Game</a>
+            <a class="topbar__link" href="/profile">Profile</a>
+            <a class="topbar__link topbar__link--active" href="/leaderboard">Leaderboard</a>
+            <a class="topbar__link" href="/creator">Creator</a>
+          </div>
+        </nav>
+
+        <div class="hero__copy">
+          <p class="eyebrow">Multi-tier leaderboard</p>
+          <h1>Top 100 luckiest spins in each deposit tier.</h1>
+          <p class="hero__text">
+            Ranked by highest single-spin multiplier, then win amount. Tiering is fixed when the spin is recorded.
+          </p>
+        </div>
+        <div class="hero__orbs" aria-hidden="true">
+          <span class="orb orb--blue"></span>
+          <span class="orb orb--green"></span>
+          <span class="orb orb--peach"></span>
+        </div>
+      </header>
+
+      <main class="leaderboard-layout">
+        <section class="panel leaderboard-panel">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Tiers</p>
+              <h2>Switch between leaderboard buckets</h2>
+              <p class="panel__subtext">Tier A: under R200, Tier B: R200 to R5000, Tier C: over R5000.</p>
+            </div>
+            <div class="status-pill" id="leaderboard-status">Loading leaderboard...</div>
+          </div>
+
+          <div class="segmented-control segmented-control--wide">
+            <button class="segment is-active" data-tier="A" type="button">Tier A</button>
+            <button class="segment" data-tier="B" type="button">Tier B</button>
+            <button class="segment" data-tier="C" type="button">Tier C</button>
+          </div>
+
+          <div class="table-shell">
+            <table class="leaderboard-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Username</th>
+                  <th>Luck Multiplier</th>
+                  <th>Win Amount</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+            <div id="empty-state" class="empty-state is-hidden">No spins recorded for this tier yet.</div>
+          </div>
+        </section>
+
+        <section class="panel leaderboard-panel leaderboard-panel--secondary">
+          <div class="panel__header">
+            <div>
+              <p class="panel__eyebrow">Consistency</p>
+              <h2>Players who hit lucky rolls most often</h2>
+              <p class="panel__subtext">
+                Ranked by total winning spins, then hit rate, then best multiplier within the active tier.
+              </p>
+            </div>
+            <div class="status-pill" id="frequency-status">Loading winner frequency...</div>
+          </div>
+
+          <div class="table-shell">
+            <table class="leaderboard-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Username</th>
+                  <th>Lucky Rolls</th>
+                  <th>Hit Rate</th>
+                  <th>Best Win</th>
+                </tr>
+              </thead>
+              <tbody id="frequency-body"></tbody>
+            </table>
+            <div id="frequency-empty-state" class="empty-state is-hidden">
+              No winning spins recorded for this tier yet.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/leaderboard.js" defer></script>
+  </body>
+</html>

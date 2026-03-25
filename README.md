@@ -1,106 +1,101 @@
-# Python Slot Machine
+# Pixel Slot Studio
 
-A simple command-line slot machine game built in Python. Players deposit funds, choose how many lines to bet on, place a per-line wager, and spin a 3x3 slot machine to try to win based on matching symbols across active lines.
+I built Pixel Slot Studio as a full web-based slot machine experience with authentication, persistent profiles, leaderboard tiers, badges, and creator pages. I wanted it to feel playful and polished while still running on a very lightweight Python stack.
 
-## Features
+I also made this project on a 4GB RAM Intel Celeron Mercer Windows tablet that is actually running Arch Linux with the ML4W dotfiles, which makes this build even more personal to me.
 
-- Command-line gameplay with interactive prompts
-- Adjustable betting across 1 to 3 lines
-- Balance tracking across multiple rounds
-- Weighted symbol pool for varied spin outcomes
-- Payout calculation based on symbol value and active betting lines
+## What I Built
 
-## How It Works
-
-The game starts by asking the player to deposit money. On each round, the player:
-
-1. Chooses how many lines to bet on
-2. Sets a bet amount per line
-3. Spins the slot machine
-4. Receives winnings if matching symbols appear across a selected line
-
-The game continues until the player quits, and the final balance is shown at the end.
+- A browser-based 3x3 slot machine with smooth reel animation
+- Secure user registration, login, logout, and cookie-based session management
+- Persistent SQLite storage for users, spins, profile data, and leaderboard history
+- Tiered leaderboards for top single-spin multipliers and frequent lucky winners
+- A polished profile system with editable display name and bio
+- Server-side badges for luck, unlucky streaks, grind time, and leaderboard rank
+- Top 10 cosmetic unlocks for exclusive skins, banners, and preset profile pics
+- Custom avatar and banner uploads for player profiles
+- A dedicated creator page for my links, support section, and project backstory
 
 ## Tech Stack
 
 - Python 3
-- Standard library only (`random`)
+- Built-in Python HTTP server
+- SQLite
+- HTML
+- CSS
+- JavaScript
 
 ## Project Structure
 
 ```text
 .
 ├── main.py
-└── README.md
+├── README.md
+├── slots.db
+└── web
+    ├── app.js
+    ├── creator.html
+    ├── index.html
+    ├── leaderboard.html
+    ├── leaderboard.js
+    ├── profile.html
+    ├── profile.js
+    ├── styles.css
+    └── uploads
 ```
 
-## Getting Started
+## Features
 
-### Prerequisites
+### Gameplay
 
-- Python 3.10 or newer recommended
+- 3x3 slot machine layout
+- All 3 horizontal lines are always active
+- Minimum bet per line: `R1`
+- Maximum bet per line: `R300`
+- Maximum single deposit: `R3000`
+- Server-side win calculation and payout validation
 
-### Run Locally
+### Accounts
+
+- User registration and login
+- Session persistence with secure cookies
+- Authenticated spins only for leaderboard recording
+
+### Profiles
+
+- Editable display name and bio
+- Custom avatar uploads
+- Custom banner uploads
+- Unlockable preset skins, banners, and profile pics
+- Elite cosmetics for users in the top 10
+- Badge system based on luck, unlucky runs, grind time, and leaderboard presence
+
+### Leaderboards
+
+- Tier A: under `R200`
+- Tier B: `R200` to `R5000`
+- Tier C: over `R5000`
+- Top 100 highest single-spin multipliers per tier
+- Top 100 most frequent lucky winners per tier
+
+## Running It Locally
 
 ```bash
 python main.py
 ```
 
-If your system uses `python3` instead of `python`, run:
-
-```bash
-python3 main.py
-```
-
-## Gameplay Rules
-
-- The slot machine uses a 3x3 grid
-- You can bet on 1 to 3 lines
-- The minimum bet per line is `R1`
-- The maximum bet per line is `R100`
-- A winning line is one where all symbols match across the row
-- Winnings are calculated as:
+Then open:
 
 ```text
-symbol value x bet per line
-```
-
-### Symbol Values
-
-| Symbol | Count | Value |
-| --- | ---: | ---: |
-| A | 2 | 5 |
-| B | 4 | 4 |
-| C | 6 | 3 |
-| D | 8 | 2 |
-
-## Example
-
-```text
-Current balance is R100
-Press enter to spin(q to quit).
-Enter the number of lines to bet on (1-3)3
-What would you like to bet? R10
-You are betting R10 on 3 lines. Total is equal to:  R30
-A | B | D
-A | B | C
-A | B | D
-You won R50
-You won on: 1
+http://127.0.0.1:8000
 ```
 
 ## Notes
 
-- This project is a console-based learning project and does not include a graphical user interface
-- No third-party packages are required
-
-## Future Improvements
-
-- Add automated tests
-- Separate game logic from input/output for easier maintenance
-- Package the project for cleaner distribution
-- Add configurable symbols, payouts, and machine dimensions
+- I kept the backend lightweight and dependency-free by using Python’s standard library instead of Flask or Django.
+- Leaderboard tiering, win calculations, badge logic, and unlock checks all happen on the server.
+- Uploaded profile images are stored locally in `web/uploads`.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](/home/valtos/python%20project/LICENSE) file for details.
+This project is licensed under the MIT License. See [LICENSE](/home/valtos/python%20project/LICENSE).
