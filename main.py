@@ -22,27 +22,54 @@ UPLOAD_SIZE_LIMIT = 2 * 1024 * 1024
 FLASK_SECRET = os.environ.get("SESSION_SECRET", "pixel-slot-studio-dev-secret")
 PP_RATE = 10  # R10 = 1 Prestige Point
 
-MODE_CONFIG = {
+# =============================================================================
+# CLASS CONFIGURATION (TDA Economy System)
+# =============================================================================
+# Each class has:
+#   - starting_tda: Initial Total Depositable Amount
+#   - profit_multiplier: Bonus applied to net profits (1.02 = +2% for Medium)
+#   - bankruptcy_protection: Whether TDA has a minimum floor
+#   - min_tda_floor: Minimum TDA when bankruptcy protection is active
+#   - recharge_cooldown_hours: Hours between recharges (None = no recharge)
+#   - a_denominator: Base odds for A-value symbols
+#   - deposit_cap: Maximum amount that can be moved to play balance (None = unlimited)
+# =============================================================================
+
+CLASS_CONFIG = {
     "easy": {
-        "label": "Easy",
-        "starting_limit": 100000.0,
+        "name": "Easy",
+        "starting_tda": 1500.0,
+        "profit_multiplier": 1.0,  # 1:1 profit
+        "bankruptcy_protection": True,
+        "min_tda_floor": 10.0,
+        "recharge_cooldown_hours": 24,
         "a_denominator": 1000.0,
-        "cap": 100000.0,
-        "balance_cap": 100000.0,  # Hard balance cap for Easy Mode
+        "deposit_cap": 1000.0,  # Can move up to R1,000 to play balance
     },
     "medium": {
-        "label": "Medium",
-        "starting_limit": 1000.0,
+        "name": "Medium",
+        "starting_tda": 1000.0,
+        "profit_multiplier": 1.02,  # 2% bonus on net profit
+        "bankruptcy_protection": True,
+        "min_tda_floor": 10.0,
+        "recharge_cooldown_hours": 48,
         "a_denominator": 200.0,
-        "cap": 50000.0,
+        "deposit_cap": 500.0,  # Can move up to R500 to play balance
     },
     "hard": {
-        "label": "Hard",
-        "starting_limit": 200.0,
+        "name": "Hard",
+        "starting_tda": 500.0,
+        "profit_multiplier": 1.0,  # 1:1 profit
+        "bankruptcy_protection": False,  # Game Over allowed
+        "min_tda_floor": 0.0,
+        "recharge_cooldown_hours": None,  # No recharge available
         "a_denominator": 10.0,
-        "cap": 200.0,
+        "deposit_cap": None,  # No limit - can transfer any amount
     },
 }
+
+# Backward compatibility alias
+MODE_CONFIG = CLASS_CONFIG
 
 # Profile Badges for PP Store
 PROFILE_BADGES = {
@@ -666,7 +693,32 @@ class SlotStore:
                     "store_purchases": "INTEGER NOT NULL DEFAULT 0",
                     "selected_badge": "TEXT NOT NULL DEFAULT ''",
                     "selected_theme": "TEXT NOT NULL DEFAULT ''",
+                    # TDA Economy System columns
+                    "total_depositable_amount": "REAL NOT NULL DEFAULT 0",
+                    "play_balance": "REAL NOT NULL DEFAULT 0",
+                    "selected_class": "TEXT NOT NULL DEFAULT ''",
+                    "tda_recharge_available_at": "TEXT",
                 },
+            )
+            # Create transaction ledger table for TDA atomic transactions
+            self.conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS transaction_ledger (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    transaction_type TEXT NOT NULL,
+                    amount REAL NOT NULL,
+                    tda_before REAL NOT NULL,
+                    tda_after REAL NOT NULL,
+                    play_balance_before REAL NOT NULL,
+                    play_balance_after REAL NOT NULL,
+                    metadata TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_ledger_user_id ON transaction_ledger(user_id);
+                CREATE INDEX IF NOT EXISTS idx_ledger_created_at ON transaction_ledger(created_at);
+                """
             )
             self._ensure_table_columns(
                 "spin_results",
@@ -711,32 +763,36 @@ class SlotStore:
         return self.conn.execute("SELECT * FROM users WHERE id = %s", (user_id,)).fetchone()
 
     def _leaderboard_rows(self, difficulty=None, limit=100):
-        if difficulty and difficulty not in MODE_CONFIG:
+        """
+        Get leaderboard rows ranked by Total Depositable Amount (TDA).
+        
+        TDA is the primary ranking metric in the new economy system.
+        """
+        if difficulty and difficulty not in CLASS_CONFIG:
             raise ValueError("Unknown difficulty.")
 
         sql = """
             SELECT id,
                    username,
                    COALESCE(NULLIF(display_name, ''), username) AS display_name,
-                   difficulty_mode,
+                   selected_class,
+                   total_depositable_amount,
                    total_deposit,
                    total_wins,
                    total_games,
-                   max_deposit_limit,
-                   balance,
                    (CASE WHEN total_games > 0 THEN CAST(total_wins AS REAL) / total_games ELSE 0 END) AS lucky_ratio
             FROM users
-            WHERE difficulty_mode <> ''
+            WHERE selected_class <> ''
               AND total_games > 0
         """
         params = []
         if difficulty:
-            sql += " AND difficulty_mode = %s"
+            sql += " AND selected_class = %s"
             params.append(difficulty)
         sql += """
-            ORDER BY (total_deposit + (CASE WHEN total_games > 0 THEN CAST(total_wins AS REAL) / total_games ELSE 0 END)) DESC,
-                     total_deposit DESC,
-                     total_wins DESC,
+            ORDER BY total_depositable_amount DESC,
+                     lucky_ratio DESC,
+                     total_games DESC,
                      username ASC
             LIMIT %s
         """
@@ -745,50 +801,56 @@ class SlotStore:
         results = []
         for index, row in enumerate(rows, start=1):
             lucky_ratio = round(row["lucky_ratio"] or 0, 4)
+            # Use TDA as primary, fallback to total_deposit for legacy users
+            tda = row["total_depositable_amount"] or row["total_deposit"]
+            class_mode = row["selected_class"] or row.get("difficulty_mode", "easy")
             results.append(
                 {
                     "rank": index,
                     "userId": row["id"],
                     "username": row["username"],
                     "displayName": row["display_name"],
-                    "difficulty": row["difficulty_mode"],
-                    "difficultyLabel": MODE_CONFIG[row["difficulty_mode"]]["label"],
-                    "totalDeposit": round(row["total_deposit"], 2),
+                    "class": class_mode,
+                    "classLabel": CLASS_CONFIG[class_mode]["name"] if class_mode in CLASS_CONFIG else class_mode.title(),
+                    "tda": round(tda, 2),
                     "luckyRatio": lucky_ratio,
-                    "unluckyRatio": round(1 - lucky_ratio, 4) if row["total_games"] else 0,
                     "totalWins": row["total_wins"],
                     "totalGames": row["total_games"],
-                    "maxDepositLimit": round(row["max_deposit_limit"], 2),
-                    "score": score_from_values(row["total_deposit"], row["total_wins"], row["total_games"]),
                 }
             )
         return results
 
     def _global_rank(self, user_id):
+        """Get the user's rank in the global TDA leaderboard."""
         for row in self._leaderboard_rows(None, 1000):
             if row["userId"] == user_id:
                 return row["rank"]
         return None
 
-    def _mode_rank(self, user_id, difficulty):
-        if not difficulty:
+    def _class_rank(self, user_id, selected_class):
+        """Get the user's rank within their class."""
+        if not selected_class:
             return None
-        for row in self._leaderboard_rows(difficulty, 1000):
+        for row in self._leaderboard_rows(selected_class, 1000):
             if row["userId"] == user_id:
                 return row["rank"]
         return None
 
-    def _unlock_context(self, row, global_rank, mode_rank):
+    def _unlock_context(self, row, global_rank, class_rank):
+        """Build context for checking achievement unlocks."""
         total_games = row["total_games"]
         lucky_ratio = (row["total_wins"] / total_games) if total_games else 0
+        # Support both legacy (difficulty_mode) and new (selected_class) columns
+        selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
         return {
-            "difficulty": row["difficulty_mode"],
+            "class": selected_class,
             "total_games": total_games,
             "total_wins": row["total_wins"],
             "hit_rate": lucky_ratio,
             "global_rank": global_rank,
-            "mode_rank": mode_rank,
-            "profile_banner_status": row["profile_banner_status"],
+            "class_rank": class_rank,
+            "profile_banner_status": row.get("profile_banner_status"),
+            "total_depositable_amount": row.get("total_depositable_amount"),
         }
 
     def _requirement_unlocked(self, requirement, context):
@@ -929,13 +991,21 @@ class SlotStore:
         return f"/uploads/{filename}"
 
     def _profile_payload(self, row):
+        """Build the profile payload with TDA economy stats."""
         global_rank = self._global_rank(row["id"])
-        mode_rank = self._mode_rank(row["id"], row["difficulty_mode"])
+        # Support both legacy (difficulty_mode) and new (selected_class) columns
+        selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
+        class_rank = self._class_rank(row["id"], selected_class)
         is_top_ten = global_rank is not None and global_rank <= 10
         lucky_ratio = (row["total_wins"] / row["total_games"]) if row["total_games"] else 0
         profile_name = row["display_name"] or row["username"]
-        cosmetics = self._cosmetics(row, global_rank, mode_rank)
+        cosmetics = self._cosmetics(row, global_rank, class_rank)
         effective = self._effective_cosmetics(row, cosmetics)
+        
+        # TDA stats
+        tda = row.get("total_depositable_amount") or 0
+        play_balance = row.get("play_balance") or 0
+        
         return {
             "profile": {
                 "username": row["username"],
@@ -954,25 +1024,31 @@ class SlotStore:
                 "totalDeposit": round(row["total_deposit"], 2),
                 "balance": round(row["balance"], 2),
                 "maxDepositLimit": round(row["max_deposit_limit"], 2),
-                "difficulty": row["difficulty_mode"],
-                "difficultyLabel": MODE_CONFIG[row["difficulty_mode"]]["label"] if row["difficulty_mode"] else "Unset",
+                "selectedClass": selected_class,
+                "classLabel": CLASS_CONFIG[selected_class]["name"] if selected_class in CLASS_CONFIG else selected_class.title(),
+                "classConfig": CLASS_CONFIG[selected_class] if selected_class in CLASS_CONFIG else None,
                 "totalGames": row["total_games"],
                 "totalWins": row["total_wins"],
                 "hitRate": round(lucky_ratio, 4),
                 "accountDays": max((utcnow() - datetime.fromisoformat(row["created_at"])).days, 0),
-                "profileBannerStatus": row["profile_banner_status"],
+                "profileBannerStatus": row.get("profile_banner_status"),
                 "prestigePoints": round(row["prestige_points"], 2),
                 "totalPP": round(row["total_pp_earned"], 2),
             },
+            "tda": {
+                "total": round(tda, 2),
+                "playBalance": round(play_balance, 2),
+                "rechargeAvailableAt": row.get("tda_recharge_available_at"),
+            },
             "ranks": {
                 "globalRank": global_rank,
-                "modeRank": mode_rank,
+                "classRank": class_rank,
                 "isTopTen": is_top_ten,
             },
-            "badges": self._badges(row, global_rank, mode_rank),
+            "badges": self._badges(row, global_rank, class_rank),
             "storeBadges": self._store_badges(row),
             "cosmetics": cosmetics,
-            "achievements": self._get_achievements(row, global_rank, mode_rank),
+            "achievements": self._get_achievements(row, global_rank, class_rank),
         }
 
     def _check_achievement(self, achievement_id, row, global_rank, mode_rank):
@@ -1041,11 +1117,13 @@ class SlotStore:
         elif req_type == "leaderboard_enter":
             return bool(global_rank)
         elif req_type == "pity_break":
-            return row["current_a_denominator"] < MODE_CONFIG.get(row["difficulty_mode"], {}).get("a_denominator", 200)
+            selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
+            return row["current_a_denominator"] < CLASS_CONFIG.get(selected_class, {}).get("a_denominator", 200)
         elif req_type == "medium_streak_mult":
-            return row["difficulty_mode"] == "medium" and row["win_streak"] >= req.get("value", 0)
+            selected_class = row.get("selected_class") or row.get("difficulty_mode")
+            return selected_class == "medium" and row["win_streak"] >= req.get("value", 0)
         elif req_type == "bankruptcy_recovery":
-            return row["total_games"] > 0 and row["balance"] > 0  # Simplified
+            return row["total_games"] > 0 and row.get("total_depositable_amount", 0) > 0
         # =============================================
         # NEW 500+ ACHIEVEMENT TYPES
         # =============================================
@@ -1102,6 +1180,300 @@ class SlotStore:
                     unlocked_ids.add(achievement_id)
                     newly_unlocked.append(achievement_id)
         return list(unlocked_ids), newly_unlocked
+
+    # =============================================================================
+    # TDA (Total Depositable Amount) Economy System Functions
+    # =============================================================================
+
+    def _record_transaction(self, entry):
+        """Record a transaction in the ledger."""
+        self.conn.execute(
+            """
+            INSERT INTO transaction_ledger 
+            (user_id, transaction_type, amount, tda_before, tda_after, 
+             play_balance_before, play_balance_after, metadata, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                entry['user_id'],
+                entry['transaction_type'],
+                entry['amount'],
+                entry['tda_before'],
+                entry['tda_after'],
+                entry.get('play_balance_before', 0),
+                entry.get('play_balance_after', 0),
+                entry.get('metadata', '{}'),
+                utcnow().isoformat(),
+            ),
+        )
+
+    def update_tda(self, user_id, amount, transaction_type, metadata=None):
+        """
+        Centralized TDA update with transaction ledger entry and profit multiplier.
+        
+        For Medium mode wins, automatically applies the 0.02x (2%) bonus.
+        
+        Args:
+            user_id: User ID
+            amount: Amount to add (positive) or subtract (negative) from TDA
+            transaction_type: 'spin_win', 'spin_loss', 'deposit_to_play', 'recharge'
+            metadata: Additional context
+        
+        Returns:
+            dict with {tda_before, tda_after, bonus_applied, bankruptcy_protected}
+        """
+        with self.lock, self.conn:
+            row = self._user_row(user_id)
+            
+            tda_before = row['total_depositable_amount']
+            class_mode = row['selected_class'] or 'easy'
+            config = CLASS_CONFIG.get(class_mode, CLASS_CONFIG['easy'])
+            
+            # Apply profit multiplier for Medium mode wins
+            bonus_applied = 0
+            final_amount = amount
+            
+            if transaction_type == 'spin_win' and config['profit_multiplier'] > 1.0:
+                bonus_applied = amount * (config['profit_multiplier'] - 1.0)
+                final_amount = amount + bonus_applied
+                metadata = metadata or {}
+                metadata['bonus_applied'] = bonus_applied
+            
+            # Calculate new TDA
+            tda_after = tda_before + final_amount
+            
+            # Bankruptcy protection (Easy/Medium)
+            bankruptcy_protected = False
+            if config['bankruptcy_protection'] and tda_after < config['min_tda_floor']:
+                tda_after = config['min_tda_floor']
+                bankruptcy_protected = True
+                metadata = metadata or {}
+                metadata['bankruptcy_protection_triggered'] = True
+            
+            # Hard mode game over check
+            game_over = False
+            if not config['bankruptcy_protection'] and tda_after <= 0:
+                tda_after = 0
+                game_over = True
+                metadata = metadata or {}
+                metadata['game_over'] = True
+            
+            # Atomic update
+            self.conn.execute(
+                """
+                UPDATE users 
+                SET total_depositable_amount = %s,
+                    status = %s
+                WHERE id = %s
+                """,
+                (tda_after, f"TDA update: {transaction_type}", user_id),
+            )
+            
+            # Record in transaction ledger
+            self._record_transaction({
+                'user_id': user_id,
+                'transaction_type': transaction_type,
+                'amount': final_amount,
+                'tda_before': tda_before,
+                'tda_after': tda_after,
+                'play_balance_before': row['play_balance'],
+                'play_balance_after': row['play_balance'],
+                'metadata': json.dumps(metadata) if metadata else '{}',
+            })
+            
+            return {
+                'tda_before': tda_before,
+                'tda_after': tda_after,
+                'amount_changed': final_amount,
+                'bonus_applied': bonus_applied,
+                'bankruptcy_protected': bankruptcy_protected,
+                'game_over': game_over,
+            }
+
+    def deposit_to_play(self, user_id, amount):
+        """
+        Move money from TDA to Play Balance.
+        """
+        if amount <= 0:
+            raise ValueError("Amount must be positive.")
+        
+        with self.lock, self.conn:
+            row = self._user_row(user_id)
+            
+            if amount > row['total_depositable_amount']:
+                raise ValueError(f"Insufficient TDA. Have: R{row['total_depositable_amount']:.2f}")
+            
+            # Check deposit cap for Easy/Medium
+            class_mode = row['selected_class'] or 'easy'
+            config = CLASS_CONFIG.get(class_mode, CLASS_CONFIG['easy'])
+            
+            if config.get('deposit_cap') is not None:
+                max_deposit = min(row['total_depositable_amount'], config['deposit_cap'])
+                if amount > max_deposit:
+                    raise ValueError(f"Deposit cap: R{max_deposit:.2f}")
+            
+            # Atomic transfer
+            tda_before = row['total_depositable_amount']
+            play_before = row['play_balance']
+            
+            self.conn.execute(
+                """
+                UPDATE users
+                SET total_depositable_amount = total_depositable_amount - %s,
+                    play_balance = play_balance + %s,
+                    status = %s
+                WHERE id = %s
+                """,
+                (amount, amount, f"Moved R{amount:.2f} to play balance", user_id),
+            )
+            
+            # Record transaction
+            self._record_transaction({
+                'user_id': user_id,
+                'transaction_type': 'deposit_to_play',
+                'amount': -amount,
+                'tda_before': tda_before,
+                'tda_after': tda_before - amount,
+                'play_balance_before': play_before,
+                'play_balance_after': play_before + amount,
+            })
+            
+            return {
+                'tda': tda_before - amount,
+                'play_balance': play_before + amount,
+            }
+
+    def select_class(self, user_id, class_mode):
+        """
+        Select or change class. Resets progress if changing classes.
+        """
+        if class_mode not in CLASS_CONFIG:
+            raise ValueError(f"Invalid class: {class_mode}")
+        
+        with self.lock, self.conn:
+            row = self._user_row(user_id)
+            
+            # Check if already has a class
+            if row['selected_class'] and row['selected_class'] != class_mode:
+                # Class change = reset
+                config = CLASS_CONFIG[class_mode]
+                
+                self.conn.execute(
+                    """
+                    UPDATE users
+                    SET selected_class = %s,
+                        total_depositable_amount = %s,
+                        play_balance = 0,
+                        total_games = 0,
+                        total_wins = 0,
+                        win_streak = 0,
+                        status = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        class_mode, 
+                        config['starting_tda'],
+                        f"Started {config['name']} class with R{config['starting_tda']:.2f} TDA",
+                        user_id
+                    )
+                )
+                
+                return {
+                    'class': class_mode,
+                    'starting_tda': config['starting_tda'],
+                    'reset': True,
+                }
+            
+            # First time selection
+            config = CLASS_CONFIG[class_mode]
+            
+            # If user has no TDA yet, initialize it
+            current_tda = row['total_depositable_amount']
+            if current_tda <= 0:
+                current_tda = config['starting_tda']
+            
+            self.conn.execute(
+                """
+                UPDATE users
+                SET selected_class = %s,
+                    total_depositable_amount = %s,
+                    current_a_denominator = %s,
+                    status = %s
+                WHERE id = %s
+                """,
+                (
+                    class_mode,
+                    current_tda,
+                    config['a_denominator'],
+                    f"Selected {config['name']} class",
+                    user_id
+                )
+            )
+            
+            return {
+                'class': class_mode,
+                'starting_tda': current_tda,
+                'reset': False,
+            }
+
+    def recharge_tda(self, user_id):
+        """
+        Recharge TDA for Easy/Medium mode users who hit bankruptcy.
+        """
+        with self.lock, self.conn:
+            row = self._user_row(user_id)
+            class_mode = row['selected_class'] or 'easy'
+            config = CLASS_CONFIG.get(class_mode)
+            
+            if not config or not config['bankruptcy_protection']:
+                raise ValueError("Recharge not available for this class.")
+            
+            if row['total_depositable_amount'] > config['min_tda_floor']:
+                raise ValueError("TDA is above bankruptcy threshold.")
+            
+            # Check cooldown
+            if row['tda_recharge_available_at']:
+                recharge_time = datetime.fromisoformat(row['tda_recharge_available_at'])
+                if datetime.now() < recharge_time:
+                    raise ValueError(f"Recharge available at {recharge_time}")
+            
+            # Calculate recharge amount (50% of starting TDA)
+            recharge_amount = config['starting_tda'] * 0.5
+            next_recharge = datetime.now() + timedelta(hours=config['recharge_cooldown_hours'])
+            
+            self.conn.execute(
+                """
+                UPDATE users
+                SET total_depositable_amount = %s,
+                    tda_recharge_available_at = %s,
+                    status = %s
+                WHERE id = %s
+                """,
+                (
+                    recharge_amount,
+                    next_recharge.isoformat(),
+                    f"TDA recharged to R{recharge_amount:.2f}",
+                    user_id
+                )
+            )
+            
+            # Record transaction
+            self._record_transaction({
+                'user_id': user_id,
+                'transaction_type': 'recharge',
+                'amount': recharge_amount,
+                'tda_before': row['total_depositable_amount'],
+                'tda_after': recharge_amount,
+                'play_balance_before': row['play_balance'],
+                'play_balance_after': row['play_balance'],
+                'metadata': json.dumps({'next_recharge': next_recharge.isoformat()}),
+            })
+            
+            return {
+                'recharged_amount': recharge_amount,
+                'new_tda': recharge_amount,
+                'next_recharge': next_recharge.isoformat(),
+            }
 
     def add_prestige_points(self, user_id, amount):
         """Add PP based on deposits (R10 = 1 PP)."""
@@ -1290,30 +1662,41 @@ class SlotStore:
             return json.loads(row["inventory"] or "{}")
 
     def _snapshot(self, row):
+        """Build the game snapshot with TDA economy stats."""
         lucky_ratio = (row["total_wins"] / row["total_games"]) if row["total_games"] else 0
         denominator = row["current_a_denominator"] or 0
         global_rank = self._global_rank(row["id"])
-        mode_rank = self._mode_rank(row["id"], row["difficulty_mode"])
-        cosmetics = self._cosmetics(row, global_rank, mode_rank)
+        # Support both legacy (difficulty_mode) and new (selected_class) columns
+        selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
+        class_rank = self._class_rank(row["id"], selected_class)
+        cosmetics = self._cosmetics(row, global_rank, class_rank)
         effective = self._effective_cosmetics(row, cosmetics)
+        
+        # TDA stats
+        tda = row.get("total_depositable_amount") or 0
+        play_balance = row.get("play_balance") or 0
+        recharge_available_at = row.get("tda_recharge_available_at")
+        
         return {
             "authenticated": True,
-            "needsDifficultySelection": not bool(row["difficulty_mode"]),
-            "difficultyOptions": [
+            "needsClassSelection": not bool(selected_class),
+            "classOptions": [
                 {
                     "id": mode,
-                    "label": config["label"],
-                    "startingLimit": config["starting_limit"],
-                    "aDenominator": config["a_denominator"],
+                    "name": config["name"],
+                    "startingTda": config["starting_tda"],
+                    "profitMultiplier": config["profit_multiplier"],
+                    "bankruptcyProtection": config["bankruptcy_protection"],
                 }
-                for mode, config in MODE_CONFIG.items()
+                for mode, config in CLASS_CONFIG.items()
             ],
             "user": {
                 "id": row["id"],
                 "username": row["username"],
                 "displayName": row["display_name"] or row["username"],
-                "difficulty": row["difficulty_mode"],
-                "difficultyLabel": MODE_CONFIG[row["difficulty_mode"]]["label"] if row["difficulty_mode"] else "Unset",
+                "selectedClass": selected_class,
+                "classLabel": CLASS_CONFIG[selected_class]["name"] if selected_class in CLASS_CONFIG else selected_class.title(),
+                "classConfig": CLASS_CONFIG[selected_class] if selected_class in CLASS_CONFIG else None,
                 "balance": round(row["balance"], 2),
                 "totalDeposit": round(row["total_deposit"], 2),
                 "maxDepositLimit": round(row["max_deposit_limit"], 2),
@@ -1327,7 +1710,7 @@ class SlotStore:
                 "selectedAvatar": effective["selectedAvatar"],
                 "avatarPath": row["custom_avatar_path"],
                 "bannerPath": row["custom_banner_path"],
-                "profileBannerStatus": row["profile_banner_status"],
+                "profileBannerStatus": row.get("profile_banner_status"),
                 "isTopTen": bool(global_rank and global_rank <= 10),
                 "prestigePoints": round(row["prestige_points"], 2),
                 "totalPP": round(row["total_pp_earned"], 2),
@@ -1343,26 +1726,33 @@ class SlotStore:
                 "minBet": MIN_BET,
                 "maxLines": LINES,
             },
-            "modeSelection": {
+            "tda": {
+                "total": round(tda, 2),
+                "playBalance": round(play_balance, 2),
+                "rechargeAvailableAt": recharge_available_at,
+            },
+            "classSelection": {
                 "canChange": True,
-                "current": row["difficulty_mode"] or "",
+                "current": selected_class or "",
                 "historyResetsOnChange": True,
-                "modeRank": mode_rank,
+                "classRank": class_rank,
             },
         }
 
     def guest_snapshot(self):
+        """Return a snapshot for unauthenticated users."""
         return {
             "authenticated": False,
-            "needsDifficultySelection": False,
-            "difficultyOptions": [
+            "needsClassSelection": False,
+            "classOptions": [
                 {
                     "id": mode,
-                    "label": config["label"],
-                    "startingLimit": config["starting_limit"],
-                    "aDenominator": config["a_denominator"],
+                    "name": config["name"],
+                    "startingTda": config["starting_tda"],
+                    "profitMultiplier": config["profit_multiplier"],
+                    "bankruptcyProtection": config["bankruptcy_protection"],
                 }
-                for mode, config in MODE_CONFIG.items()
+                for mode, config in CLASS_CONFIG.items()
             ],
             "user": None,
             "balance": 0,
@@ -1370,8 +1760,10 @@ class SlotStore:
             "lastWin": 0,
             "lastNet": 0,
             "winningLines": [],
-            "status": "Sign in and choose a difficulty to begin.",
+            "status": "Sign in and choose a class to begin.",
             "limits": {"minBet": MIN_BET, "maxLines": LINES},
+            "tda": None,
+            "classSelection": None,
         }
 
     def register_user(self, username, password):
@@ -1411,34 +1803,51 @@ class SlotStore:
             row = self._user_row(user_id)
         return self._snapshot(row) if row else None
 
-    def select_difficulty(self, user_id, difficulty):
-        difficulty = difficulty.lower()
-        if difficulty not in MODE_CONFIG:
+    def select_class(self, user_id, class_name):
+        """Select a class (easy/medium/hard) in the TDA economy system.
+        
+        This is a major economy change - switching classes resets:
+        - TDA (Total Depositable Amount)
+        - Play balance
+        - All game statistics
+        """
+        class_name = class_name.lower()
+        if class_name not in CLASS_CONFIG:
             raise ValueError("Please choose easy, medium, or hard.")
-        config = MODE_CONFIG[difficulty]
+        config = CLASS_CONFIG[class_name]
         with self.lock, self.conn:
             row = self._user_row(user_id)
             if not row:
                 raise ValueError("User not found.")
-            previous_mode = row["difficulty_mode"]
-            if previous_mode == difficulty:
+            previous_class = row.get("selected_class") or row.get("difficulty_mode")
+            
+            # Check if already selected
+            if previous_class == class_name:
                 snapshot = self._snapshot(row)
-                snapshot["status"] = f"{config['label']} mode is already active."
+                snapshot["status"] = f"You're already in {config['name']} class."
                 return snapshot
 
-            history_reset = bool(previous_mode and previous_mode != difficulty)
+            # History always resets when switching classes
+            history_reset = bool(previous_class and previous_class != class_name)
             if history_reset:
                 self.conn.execute("DELETE FROM spin_results WHERE user_id = %s", (user_id,))
                 status = (
-                    f"Switched from {MODE_CONFIG[previous_mode]['label']} to {config['label']}. "
-                    f"Previous run history, leaderboard score, and balance were reset."
+                    f"Switched from {CLASS_CONFIG.get(previous_class, {}).get('name', previous_class)} "
+                    f"to {config['name']}. "
+                    f"Your Vault was reset."
                 )
             else:
-                status = f"{config['label']} mode selected. Add funds to begin."
+                status = f"{config['name']} class selected. Your Vault starts with R{config['starting_tda']:.2f}."
+            
+            # Initialize with class settings
             self.conn.execute(
                 """
                 UPDATE users
-                SET difficulty_mode = %s,
+                SET selected_class = %s,
+                    difficulty_mode = %s,  -- Keep for legacy compatibility
+                    total_depositable_amount = %s,
+                    play_balance = %s,
+                    tda_recharge_available_at = %s,
                     balance = 0,
                     total_deposit = 0,
                     max_deposit_limit = %s,
@@ -1456,8 +1865,12 @@ class SlotStore:
                 WHERE id = %s
                 """,
                 (
-                    difficulty,
-                    config["starting_limit"],
+                    class_name,
+                    class_name,  # Also set difficulty_mode for legacy
+                    config["starting_tda"],
+                    config["starting_tda"],  # play_balance starts same as TDA
+                    None,  # No cooldown on first selection
+                    config["starting_tda"] * 10,  # Max deposit 10x starting TDA
                     config["a_denominator"],
                     json.dumps(DEFAULT_GRID),
                     status,
@@ -1467,10 +1880,17 @@ class SlotStore:
             updated = self._user_row(user_id)
         snapshot = self._snapshot(updated)
         snapshot["historyReset"] = history_reset
-        snapshot["previousMode"] = previous_mode or ""
+        snapshot["previousClass"] = previous_class or ""
         return snapshot
 
     def add_funds(self, user_id, amount):
+        """Deposit funds into the user's account.
+        
+        In the TDA system:
+        - Funds go to play_balance for betting
+        - Deposits count towards total_deposit for leaderboard
+        - The amount is also deposited to TDA via deposit_to_play()
+        """
         if amount <= 0:
             raise ValueError("Deposit amount must be greater than zero.")
         pp_earned = amount / PP_RATE
@@ -1478,14 +1898,23 @@ class SlotStore:
             row = self._user_row(user_id)
             if not row:
                 raise ValueError("User not found.")
-            if not row["difficulty_mode"]:
-                raise ValueError("Choose a difficulty before depositing.")
-            if amount > row["max_deposit_limit"]:
+            
+            # Check class selection
+            selected_class = row.get("selected_class") or row.get("difficulty_mode")
+            if not selected_class:
+                raise ValueError("Choose a class before depositing.")
+            
+            # Check deposit limit (10x TDA)
+            max_deposit_limit = row.get("max_deposit_limit", 10000)
+            if amount > max_deposit_limit:
                 raise ValueError(
-                    f"Deposit amount cannot exceed your current limit of R{row['max_deposit_limit']:.2f}."
+                    f"Deposit amount cannot exceed your current limit of R{max_deposit_limit:.2f}."
                 )
+            
             new_total_deposits = row["total_deposits_count"] + 1
-            new_max_balance = max(row["max_balance"], row["balance"] + amount)
+            new_max_balance = max(row["max_balance"], amount)
+            
+            # Update balance and deposit stats
             self.conn.execute(
                 """
                 UPDATE users
@@ -1500,6 +1929,10 @@ class SlotStore:
                 """,
                 (amount, amount, pp_earned, pp_earned, new_total_deposits, new_max_balance, f"Added R{amount:.2f}. +{pp_earned:.1f} PP earned!", user_id),
             )
+            
+            # Also update TDA via deposit_to_play()
+            self.deposit_to_play(user_id, amount)
+            
             updated = self._user_row(user_id)
         return self._snapshot(updated)
 
@@ -1517,108 +1950,121 @@ class SlotStore:
         return new_total, f"Bankruptcy penalty applied. Global rank #{rank} lost {int(penalty * 100)}% of total deposit score."
 
     def spin(self, user_id, bet_per_line):
+        """
+        Execute a spin using the TDA economy system.
+        
+        Flow:
+        1. Deduct bet from play_balance
+        2. Calculate winnings
+        3. Apply net result (winnings - bet) to TDA via update_tda()
+        4. update_tda() handles Medium Mode 2% bonus automatically
+        """
         if bet_per_line < MIN_BET:
             raise ValueError(f"Bet per line must be at least R{MIN_BET}.")
+        
         with self.lock, self.conn:
             row = self._user_row(user_id)
             if not row:
                 raise ValueError("User not found.")
-            difficulty = row["difficulty_mode"]
-            if not difficulty:
-                raise ValueError("Choose a difficulty before spinning.")
+            
+            # Use selected_class for TDA system (fallback to difficulty_mode for legacy)
+            class_mode = row["selected_class"] or row["difficulty_mode"]
+            if not class_mode:
+                raise ValueError("Choose a class before spinning.")
 
             total_bet = bet_per_line * LINES
-            if total_bet > row["balance"]:
-                raise ValueError("You cannot bet more than your balance.")
-            if total_bet > row["max_deposit_limit"]:
-                raise ValueError("You cannot bet more than your current max deposit limit.")
-
-            denominator = row["current_a_denominator"] or MODE_CONFIG[difficulty]["a_denominator"]
+            
+            # TDA System: Bet from play_balance
+            if total_bet > row["play_balance"]:
+                raise ValueError("You cannot bet more than your play balance. Deposit from your TDA first.")
+            
+            # Get class config
+            config = CLASS_CONFIG.get(class_mode, CLASS_CONFIG['easy'])
+            denominator = row["current_a_denominator"] or config["a_denominator"]
+            
+            # Generate spin result
             columns = generate_grid(denominator)
             winnings, winning_lines = check_winnings(columns, bet_per_line)
-            new_balance = row["balance"] - total_bet + winnings
-            total_deposit = row["total_deposit"] + winnings
+            
+            # Calculate net result
+            net_result = winnings - total_bet
+            
+            # Update game stats
             total_games = row["total_games"] + 1
             total_wins = row["total_wins"] + (1 if winnings > 0 else 0)
             previous_streak = row["win_streak"]
             win_streak = previous_streak + 1 if winnings > 0 else 0
-            max_deposit_limit = row["max_deposit_limit"]
-            next_denominator = denominator
+            max_win_streak = max(row["max_win_streak"], win_streak)
             banner_status = row["profile_banner_status"]
             consecutive_a_hits = row["consecutive_a_hits"]
-            total_a_hits = row["total_a_hits"]
-            max_win_streak = max(row["max_win_streak"], win_streak)
-            max_balance = max(row["max_balance"], new_balance)
             notes = []
-
-            # Count A-hits in this spin
+            
+            # Count A-hits
             a_count = sum(1 for col in columns for sym in col if sym == "A")
-            total_a_hits += a_count
-
-            # Calculate multiplier for achievements
+            total_a_hits = row["total_a_hits"] + a_count
+            
+            # Calculate multiplier
             multiplier = (winnings / total_bet) if total_bet > 0 else 0
             max_multiplier = max(row.get("max_multiplier") or 0, multiplier)
             
-            # Track exact win amounts for SA Special achievements
+            # Track exact win amounts
             single_spin_wins = json.loads(row.get("single_spin_wins") or "{}")
             if winnings > 0:
                 win_key = str(int(winnings))
                 single_spin_wins[win_key] = single_spin_wins.get(win_key, 0) + 1
-
-            if difficulty == "hard":
-                max_deposit_limit = MODE_CONFIG["hard"]["cap"]
-                next_denominator = MODE_CONFIG["hard"]["a_denominator"]
+            
+            # Update play_balance (deduct bet, winnings go to TDA)
+            new_play_balance = row["play_balance"] - total_bet
+            
+            # Apply TDA update (handles 2% Medium bonus, bankruptcy protection)
+            transaction_type = 'spin_win' if net_result > 0 else 'spin_loss'
+            tda_result = self.update_tda(
+                user_id, 
+                net_result, 
+                transaction_type,
+                metadata={
+                    'bet': total_bet,
+                    'winnings': winnings,
+                    'net_result': net_result,
+                    'winning_lines': winning_lines,
+                }
+            )
+            
+            # Handle difficulty-specific logic
+            next_denominator = denominator
+            
+            if class_mode == "hard":
+                next_denominator = CLASS_CONFIG["hard"]["a_denominator"]
                 if check_consecutive_a(columns):
                     consecutive_a_hits += 1
                     banner_status = "a_streak"
-                    notes.append("Consecutive A banner unlocked.")
-                if new_balance <= 0:
-                    total_deposit, note = self.demote_user_rank(user_id, total_deposit)
-                    if note:
-                        notes.append(note)
-            elif difficulty == "medium":
+                    notes.append("Consecutive A banner unlocked!")
+            elif class_mode == "medium":
                 if winnings > 0:
-                    multiplier = 1.2 if previous_streak >= 1 else 1.0
-                    max_deposit_limit = min(
-                        MODE_CONFIG["medium"]["cap"],
-                        round(max_deposit_limit + (winnings * multiplier), 2),
-                    )
-                    next_denominator = MODE_CONFIG["medium"]["a_denominator"]
-                    notes.append("Medium pity reset after a cap increase.")
+                    next_denominator = CLASS_CONFIG["medium"]["a_denominator"]
                 else:
                     next_denominator = max(10.0, round(denominator * 0.99, 2))
-            elif difficulty == "easy":
-                easy_balance_cap = MODE_CONFIG["easy"].get("balance_cap", 100000.0)
-                next_denominator = MODE_CONFIG["easy"]["a_denominator"]
-                if winnings > 0:
-                    # Cap the balance at the Easy Mode limit
-                    max_deposit_limit = min(
-                        MODE_CONFIG["easy"]["cap"],
-                        round(max_deposit_limit + winnings, 2),
-                    )
-                    # Also cap the new balance
-                    if new_balance > easy_balance_cap:
-                        overflow = new_balance - easy_balance_cap
-                        new_balance = easy_balance_cap
-                        notes.append(f"Balance capped at R{easy_balance_cap:,.0f}. Overflow of R{overflow:,.2f} was not added.")
-                else:
-                    max_deposit_limit = max(3.0, round(max_deposit_limit - (total_bet / 2), 2))
-                    notes.append("Easy mode loss penalty reduced the deposit limit.")
-
-            status = (
-                f"You won R{winnings:.2f}. Net change: R{(winnings - total_bet):.2f}."
-                if winnings
-                else f"No line match this round. Net change: R{-total_bet:.2f}."
-            )
-            if notes:
-                status = f"{status} {' '.join(notes)}"
-
+            elif class_mode == "easy":
+                next_denominator = CLASS_CONFIG["easy"]["a_denominator"]
+            
+            # Build status message
+            if winnings > 0:
+                status = f"You won R{winnings:.2f}! Net change: R{net_result:.2f}."
+                if tda_result['bonus_applied'] > 0:
+                    status += f" (+R{tda_result['bonus_applied']:.2f} Medium bonus!)"
+            else:
+                status = f"No match. Net change: R{net_result:.2f}."
+            
+            if tda_result.get('bankruptcy_protected'):
+                status += " TDA protected by bankruptcy floor."
+            if tda_result.get('game_over'):
+                status = "Game Over! Your TDA is depleted."
+            
+            # Update user record
             self.conn.execute(
                 """
                 UPDATE users
-                SET balance = %s,
-                    total_deposit = %s,
-                    max_deposit_limit = %s,
+                SET play_balance = %s,
                     current_a_denominator = %s,
                     total_games = %s,
                     total_wins = %s,
@@ -1632,15 +2078,12 @@ class SlotStore:
                     status = %s,
                     total_a_hits = %s,
                     max_win_streak = %s,
-                    max_balance = %s,
                     max_multiplier = %s,
                     single_spin_wins = %s
                 WHERE id = %s
                 """,
                 (
-                    round(new_balance, 2),
-                    round(total_deposit, 2),
-                    round(max_deposit_limit, 2),
+                    round(new_play_balance, 2),
                     round(next_denominator, 2),
                     total_games,
                     total_wins,
@@ -1649,64 +2092,59 @@ class SlotStore:
                     banner_status,
                     json.dumps(columns),
                     round(winnings, 2),
-                    round(winnings - total_bet, 2),
+                    round(net_result, 2),
                     json.dumps(winning_lines),
                     status,
                     total_a_hits,
                     max_win_streak,
-                    round(max_balance, 2),
                     round(max_multiplier, 4),
                     json.dumps(single_spin_wins),
                     user_id,
                 ),
             )
             
-            # Check and unlock achievements
+            # Check achievements
             updated_row = self._user_row(user_id)
             global_rank = self._global_rank(user_id)
-            mode_rank = self._mode_rank(user_id, difficulty)
-            unlocked_ids, newly_unlocked = self._check_and_unlock_achievements(updated_row, global_rank, mode_rank)
+            class_rank = self._class_rank(user_id, class_mode)
+            unlocked_ids, newly_unlocked = self._check_and_unlock_achievements(updated_row, global_rank, class_rank)
             
             if newly_unlocked:
                 self.conn.execute(
                     "UPDATE users SET unlocked_assets = %s WHERE id = %s",
                     (json.dumps(list(unlocked_ids)), user_id),
                 )
-                achievement_notes = [f"🏆 Unlocked: {ACHIEVEMENTS[a]['name']}!" for a in newly_unlocked[:3]]
+                achievement_notes = [f"🏆 {ACHIEVEMENTS[a]['name']}!" for a in newly_unlocked[:3]]
                 if len(newly_unlocked) > 3:
-                    achievement_notes.append(f"+{len(newly_unlocked) - 3} more achievements!")
+                    achievement_notes.append(f"+{len(newly_unlocked) - 3} more!")
                 notes.extend(achievement_notes)
+            
+            # Record spin result
             self.conn.execute(
                 """
                 INSERT INTO spin_results (
-                    user_id,
-                    difficulty_mode,
-                    win_amount,
-                    bet_amount,
-                    luck_multiplier,
-                    deposit_total,
-                    deposit_tier,
-                    total_deposit_snapshot,
-                    a_denominator_snapshot,
-                    created_at
+                    user_id, difficulty_mode, win_amount, bet_amount,
+                    luck_multiplier, deposit_total, deposit_tier,
+                    total_deposit_snapshot, a_denominator_snapshot, created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    user_id,
-                    difficulty,
-                    round(winnings, 2),
-                    round(total_bet, 2),
-                    round((winnings / total_bet) if total_bet else 0, 4),
-                    round(total_deposit, 2),
-                    difficulty,
-                    round(total_deposit, 2),
+                    user_id, class_mode, round(winnings, 2), round(total_bet, 2),
+                    round(multiplier, 4),
+                    round(tda_result['tda_after'], 2),  # Use TDA as deposit for history
+                    class_mode,
+                    round(tda_result['tda_after'], 2),
                     round(denominator, 2),
                     isoformat(utcnow()),
                 ),
             )
+            
             updated = self._user_row(user_id)
+        
         snapshot = self._snapshot(updated)
         snapshot["bet"] = {"lines": LINES, "betPerLine": bet_per_line, "total": round(total_bet, 2)}
+        snapshot["bonus_applied"] = tda_result['bonus_applied']
+        snapshot["tda"] = tda_result['tda_after']
         return snapshot
 
     def leaderboard_payload(self):
@@ -1750,8 +2188,9 @@ class SlotStore:
             if not row:
                 raise ValueError("User not found.")
             global_rank = self._global_rank(user_id)
-            mode_rank = self._mode_rank(user_id, row["difficulty_mode"])
-            cosmetics = self._cosmetics(row, global_rank, mode_rank)
+            selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
+            class_rank = self._class_rank(user_id, selected_class)
+            cosmetics = self._cosmetics(row, global_rank, class_rank)
             valid = self._valid_cosmetic_ids(cosmetics)
             effective = self._effective_cosmetics(row, cosmetics)
             if selected_skin and selected_skin not in valid["skins"]:
@@ -1915,14 +2354,23 @@ def api_logout():
     return jsonify({"ok": True})
 
 
-@app.post("/api/select-difficulty")
-def api_select_difficulty():
+@app.post("/api/select-class")
+def api_select_class():
+    """API endpoint for selecting a class in the TDA economy system."""
     user_id = require_user()
     if not user_id:
-        return jsonify({"error": "You need to sign in before choosing a difficulty."}), 401
+        return jsonify({"error": "You need to sign in before choosing a class."}), 401
     payload = request.get_json(force=True)
-    snapshot = store.select_difficulty(user_id, str(payload.get("difficulty", "")))
+    # Accept both 'class' and 'difficulty' for backward compatibility
+    class_name = str(payload.get("class") or payload.get("difficulty", ""))
+    snapshot = store.select_class(user_id, class_name)
     return jsonify(snapshot)
+
+# Keep backward compatibility endpoint
+@app.post("/api/select-difficulty")
+def api_select_difficulty():
+    """Legacy endpoint - redirects to select_class."""
+    return api_select_class()
 
 
 @app.post("/api/deposit")
@@ -2009,8 +2457,9 @@ def api_achievements():
         if not row:
             return jsonify({"error": "User not found."}), 404
         global_rank = store._global_rank(user_id)
-        mode_rank = store._mode_rank(user_id, row["difficulty_mode"])
-        achievements = store._get_achievements(row, global_rank, mode_rank)
+        selected_class = row.get("selected_class") or row.get("difficulty_mode", "easy")
+        class_rank = store._class_rank(user_id, selected_class)
+        achievements = store._get_achievements(row, global_rank, class_rank)
         unlocked_count = sum(1 for a in achievements if a["unlocked"])
         return jsonify({
             "achievements": achievements,
