@@ -115,6 +115,12 @@ class ConnectionWrapper:
     def __init__(self):
         self.lock = threading.RLock()
     
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+    
     def execute(self, sql: str, params: tuple = ()):
         """Execute SQL and return cursor wrapper."""
         conn = _connection_pool.getconn()
