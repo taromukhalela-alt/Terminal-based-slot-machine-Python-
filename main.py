@@ -319,63 +319,126 @@ class SlotStore:
 
     def _init_db(self):
         with self.conn:
-            self.conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY BIGSERIAL,
-                    username TEXT NOT NULL UNIQUE,
-                    password_salt TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    display_name TEXT NOT NULL DEFAULT '',
-                    bio TEXT NOT NULL DEFAULT '',
-                    balance REAL NOT NULL DEFAULT 0,
-                    total_deposit REAL NOT NULL DEFAULT 0,
-                    max_deposit_limit REAL NOT NULL DEFAULT 0,
-                    difficulty_mode TEXT NOT NULL DEFAULT '',
-                    current_a_denominator REAL NOT NULL DEFAULT 0,
-                    total_games INTEGER NOT NULL DEFAULT 0,
-                    total_wins INTEGER NOT NULL DEFAULT 0,
-                    win_streak INTEGER NOT NULL DEFAULT 0,
-                    consecutive_a_hits INTEGER NOT NULL DEFAULT 0,
-                    profile_banner_status TEXT NOT NULL DEFAULT 'standard',
-                    last_spin TEXT NOT NULL DEFAULT '[["A","A","A"],["A","A","A"],["A","A","A"]]',
-                    last_win REAL NOT NULL DEFAULT 0,
-                    last_net REAL NOT NULL DEFAULT 0,
-                    winning_lines TEXT NOT NULL DEFAULT '[]',
-                    selected_skin TEXT NOT NULL DEFAULT 'skyline',
-                    selected_banner TEXT NOT NULL DEFAULT 'aurora',
-                    selected_avatar TEXT NOT NULL DEFAULT 'orbit',
-                    custom_avatar_path TEXT NOT NULL DEFAULT '',
-                    custom_banner_path TEXT NOT NULL DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'Choose a difficulty to begin.',
-                    created_at TEXT NOT NULL,
-                    prestige_points REAL NOT NULL DEFAULT 0,
-                    total_pp_earned REAL NOT NULL DEFAULT 0,
-                    unlocked_assets TEXT NOT NULL DEFAULT '[]',
-                    inventory TEXT NOT NULL DEFAULT '{}',
-                    total_deposits_count INTEGER NOT NULL DEFAULT 0,
-                    max_balance REAL NOT NULL DEFAULT 0,
-                    total_a_hits INTEGER NOT NULL DEFAULT 0,
-                    max_win_streak INTEGER NOT NULL DEFAULT 0,
-                    store_purchases INTEGER NOT NULL DEFAULT 0
-                );
+            # Check if using SQLite for compatibility
+            is_sqlite = not os.environ.get("DATABASE_URL")
+            if is_sqlite:
+                # SQLite uses AUTOINCREMENT instead of BIGSERIAL
+                self.conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL UNIQUE,
+                        password_salt TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        display_name TEXT NOT NULL DEFAULT '',
+                        bio TEXT NOT NULL DEFAULT '',
+                        balance REAL NOT NULL DEFAULT 0,
+                        total_deposit REAL NOT NULL DEFAULT 0,
+                        max_deposit_limit REAL NOT NULL DEFAULT 0,
+                        difficulty_mode TEXT NOT NULL DEFAULT '',
+                        current_a_denominator REAL NOT NULL DEFAULT 0,
+                        total_games INTEGER NOT NULL DEFAULT 0,
+                        total_wins INTEGER NOT NULL DEFAULT 0,
+                        win_streak INTEGER NOT NULL DEFAULT 0,
+                        consecutive_a_hits INTEGER NOT NULL DEFAULT 0,
+                        profile_banner_status TEXT NOT NULL DEFAULT 'standard',
+                        last_spin TEXT NOT NULL DEFAULT '[["A","A","A"],["A","A","A"],["A","A","A"]]',
+                        last_win REAL NOT NULL DEFAULT 0,
+                        last_net REAL NOT NULL DEFAULT 0,
+                        winning_lines TEXT NOT NULL DEFAULT '[]',
+                        selected_skin TEXT NOT NULL DEFAULT 'skyline',
+                        selected_banner TEXT NOT NULL DEFAULT 'aurora',
+                        selected_avatar TEXT NOT NULL DEFAULT 'orbit',
+                        custom_avatar_path TEXT NOT NULL DEFAULT '',
+                        custom_banner_path TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'Choose a difficulty to begin.',
+                        created_at TEXT NOT NULL,
+                        prestige_points REAL NOT NULL DEFAULT 0,
+                        total_pp_earned REAL NOT NULL DEFAULT 0,
+                        unlocked_assets TEXT NOT NULL DEFAULT '[]',
+                        inventory TEXT NOT NULL DEFAULT '{}',
+                        total_deposits_count INTEGER NOT NULL DEFAULT 0,
+                        max_balance REAL NOT NULL DEFAULT 0,
+                        total_a_hits INTEGER NOT NULL DEFAULT 0,
+                        max_win_streak INTEGER NOT NULL DEFAULT 0,
+                        store_purchases INTEGER NOT NULL DEFAULT 0
+                    );
 
-                CREATE TABLE IF NOT EXISTS spin_results (
-                    id INTEGER PRIMARY KEY BIGSERIAL,
-                    user_id INTEGER NOT NULL,
-                    difficulty_mode TEXT NOT NULL,
-                    win_amount REAL NOT NULL,
-                    bet_amount REAL NOT NULL,
-                    luck_multiplier REAL NOT NULL DEFAULT 0,
-                    deposit_total REAL NOT NULL DEFAULT 0,
-                    deposit_tier TEXT NOT NULL DEFAULT '',
-                    total_deposit_snapshot REAL NOT NULL,
-                    a_denominator_snapshot REAL NOT NULL,
-                    created_at TEXT NOT NULL,
-                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-                );
-                """
-            )
+                    CREATE TABLE IF NOT EXISTS spin_results (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER NOT NULL,
+                        difficulty_mode TEXT NOT NULL,
+                        win_amount REAL NOT NULL,
+                        bet_amount REAL NOT NULL,
+                        luck_multiplier REAL NOT NULL DEFAULT 0,
+                        deposit_total REAL NOT NULL DEFAULT 0,
+                        deposit_tier TEXT NOT NULL DEFAULT '',
+                        total_deposit_snapshot REAL NOT NULL,
+                        a_denominator_snapshot REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                    );
+                    """
+                )
+            else:
+                # PostgreSQL uses BIGSERIAL
+                self.conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        id BIGSERIAL PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        password_salt TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        display_name TEXT NOT NULL DEFAULT '',
+                        bio TEXT NOT NULL DEFAULT '',
+                        balance REAL NOT NULL DEFAULT 0,
+                        total_deposit REAL NOT NULL DEFAULT 0,
+                        max_deposit_limit REAL NOT NULL DEFAULT 0,
+                        difficulty_mode TEXT NOT NULL DEFAULT '',
+                        current_a_denominator REAL NOT NULL DEFAULT 0,
+                        total_games INTEGER NOT NULL DEFAULT 0,
+                        total_wins INTEGER NOT NULL DEFAULT 0,
+                        win_streak INTEGER NOT NULL DEFAULT 0,
+                        consecutive_a_hits INTEGER NOT NULL DEFAULT 0,
+                        profile_banner_status TEXT NOT NULL DEFAULT 'standard',
+                        last_spin TEXT NOT NULL DEFAULT '[["A","A","A"],["A","A","A"],["A","A","A"]]',
+                        last_win REAL NOT NULL DEFAULT 0,
+                        last_net REAL NOT NULL DEFAULT 0,
+                        winning_lines TEXT NOT NULL DEFAULT '[]',
+                        selected_skin TEXT NOT NULL DEFAULT 'skyline',
+                        selected_banner TEXT NOT NULL DEFAULT 'aurora',
+                        selected_avatar TEXT NOT NULL DEFAULT 'orbit',
+                        custom_avatar_path TEXT NOT NULL DEFAULT '',
+                        custom_banner_path TEXT NOT NULL DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'Choose a difficulty to begin.',
+                        created_at TEXT NOT NULL,
+                        prestige_points REAL NOT NULL DEFAULT 0,
+                        total_pp_earned REAL NOT NULL DEFAULT 0,
+                        unlocked_assets TEXT NOT NULL DEFAULT '[]',
+                        inventory TEXT NOT NULL DEFAULT '{}',
+                        total_deposits_count INTEGER NOT NULL DEFAULT 0,
+                        max_balance REAL NOT NULL DEFAULT 0,
+                        total_a_hits INTEGER NOT NULL DEFAULT 0,
+                        max_win_streak INTEGER NOT NULL DEFAULT 0,
+                        store_purchases INTEGER NOT NULL DEFAULT 0
+                    );
+
+                    CREATE TABLE IF NOT EXISTS spin_results (
+                        id BIGSERIAL PRIMARY KEY,
+                        user_id INTEGER NOT NULL,
+                        difficulty_mode TEXT NOT NULL,
+                        win_amount REAL NOT NULL,
+                        bet_amount REAL NOT NULL,
+                        luck_multiplier REAL NOT NULL DEFAULT 0,
+                        deposit_total REAL NOT NULL DEFAULT 0,
+                        deposit_tier TEXT NOT NULL DEFAULT '',
+                        total_deposit_snapshot REAL NOT NULL,
+                        a_denominator_snapshot REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+                    );
+                    """
+                )
             self._ensure_table_columns(
                 "users",
                 {
@@ -425,11 +488,17 @@ class SlotStore:
             )
 
     def _table_columns(self, table_name):
-        rows = self.conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
-            (table_name,)
-        ).fetchall()
-        return {row["column_name"] for row in rows}
+        is_sqlite = not os.environ.get("DATABASE_URL")
+        if is_sqlite:
+            # SQLite uses PRAGMA table_info
+            rows = self.conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+            return {row["name"] for row in rows}
+        else:
+            rows = self.conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                (table_name,)
+            ).fetchall()
+            return {row["column_name"] for row in rows}
 
     def _ensure_table_columns(self, table_name, required_columns):
         existing_columns = self._table_columns(table_name)
