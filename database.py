@@ -179,7 +179,7 @@ class Database:
         with get_cursor() as cursor:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     username TEXT NOT NULL UNIQUE,
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
@@ -220,7 +220,7 @@ class Database:
             
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS spin_results (
-                    id SERIAL PRIMARY KEY,
+                    id BIGSERIAL PRIMARY KEY,
                     user_id INTEGER NOT NULL,
                     difficulty_mode TEXT NOT NULL,
                     win_amount REAL NOT NULL,
