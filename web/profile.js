@@ -19,8 +19,8 @@ const modeMetaEl = document.getElementById("profile-mode-meta");
 const rankGlobalEl = document.getElementById("rank-global");
 const rankModeEl = document.getElementById("rank-mode");
 const difficultyEl = document.getElementById("profile-difficulty");
-const totalDepositEl = document.getElementById("profile-total-deposit");
-const depositCapEl = document.getElementById("profile-deposit-cap");
+const tdaEl = document.getElementById("profile-tda");
+const playBalanceEl = document.getElementById("profile-play-balance");
 const accountDaysEl = document.getElementById("account-days");
 const hitRateEl = document.getElementById("profile-hit-rate");
 const badgeGridEl = document.getElementById("badge-grid");
@@ -41,6 +41,7 @@ const state = {
   inventory: {},
   stats: null,
   ranks: null,
+  tda: null,
   achievements: [],
   achievementsTotal: 0,
   achievementsUnlocked: 0,
@@ -136,12 +137,12 @@ function renderSignedOutState(message) {
   displayNameEl.textContent = "Pixel Spinner";
   usernameEl.textContent = "@guest";
   bioEl.textContent = "Sign in from the main game page to unlock profile editing, badges, and leaderboard cosmetics.";
-  modeMetaEl.textContent = "Difficulty unset";
+  modeMetaEl.textContent = "Class unset";
   rankGlobalEl.textContent = "Unranked";
   rankModeEl.textContent = "Unranked";
   difficultyEl.textContent = "Unset";
-  totalDepositEl.textContent = "R0";
-  depositCapEl.textContent = "R0";
+  if (tdaEl) tdaEl.textContent = "R0";
+  if (playBalanceEl) playBalanceEl.textContent = "R0";
   accountDaysEl.textContent = "0";
   hitRateEl.textContent = "0.0%";
   avatarImageEl.src = "";
@@ -192,12 +193,12 @@ function renderProfileCard() {
   displayNameEl.textContent = state.profile.displayName;
   usernameEl.textContent = `@${state.profile.username}`;
   bioEl.textContent = state.profile.bio || "Add a short bio so other players know what kind of spinner you are.";
-  modeMetaEl.textContent = `${state.stats.difficultyLabel} class • ${state.ranks.isTopTen ? "Top 10 unlocks active" : "Standard unlock track"}`;
+  modeMetaEl.textContent = `${state.stats.classLabel || state.stats.difficultyLabel} class • ${state.ranks.isTopTen ? "Top 10 unlocks active" : "Standard unlock track"}`;
   rankGlobalEl.textContent = rankLabel(state.ranks.globalRank);
-  rankModeEl.textContent = rankLabel(state.ranks.modeRank);
-  difficultyEl.textContent = state.stats.difficultyLabel;
-  totalDepositEl.textContent = currency(state.stats.totalDeposit);
-  depositCapEl.textContent = currency(state.stats.maxDepositLimit);
+  rankModeEl.textContent = rankLabel(state.ranks.classRank || state.ranks.modeRank);
+  difficultyEl.textContent = state.stats.classLabel || state.stats.difficultyLabel;
+  if (tdaEl) tdaEl.textContent = currency(state.tda?.total ?? 0);
+  if (playBalanceEl) playBalanceEl.textContent = currency(state.tda?.playBalance ?? 0);
   accountDaysEl.textContent = String(state.stats.accountDays ?? 0);
   hitRateEl.textContent = percent(state.stats.hitRate);
 
@@ -482,6 +483,7 @@ function applyPayload(payload) {
   state.cosmetics = payload.cosmetics || { skins: [], banners: [], avatars: [] };
   state.stats = payload.stats;
   state.ranks = payload.ranks;
+  state.tda = payload.tda || null;
   state.inventory = payload.stats?.inventory || {};
   setFormDisabled(false);
   renderProfileCard();

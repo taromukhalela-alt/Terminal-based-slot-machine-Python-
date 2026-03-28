@@ -50,7 +50,7 @@
 
           <div class="stats-grid stats-grid--game">
             <article class="stat-card">
-              <span class="stat-card__label">Balance</span>
+              <span class="stat-card__label">Play Balance</span>
               <strong id="balance">R0</strong>
             </article>
             <article class="stat-card">
@@ -58,12 +58,12 @@
               <strong id="spin-total">R0</strong>
             </article>
             <article class="stat-card">
-              <span class="stat-card__label">Difficulty</span>
+              <span class="stat-card__label">Class</span>
               <strong id="difficulty-label">Unset</strong>
             </article>
             <article class="stat-card">
-              <span class="stat-card__label">Deposit cap</span>
-              <strong id="deposit-cap">R0</strong>
+              <span class="stat-card__label">Vault (TDA)</span>
+              <strong id="tda-total">R0</strong>
             </article>
             <article class="stat-card">
               <span class="stat-card__label">A probability</span>
@@ -199,19 +199,54 @@
           <section class="panel controls-panel">
             <div class="panel__header compact">
               <div>
-                <p class="panel__eyebrow">Game controls</p>
-                <h2>Fund and manage the run</h2>
+                <p class="panel__eyebrow">The Vault</p>
+                <h2>Manage your TDA and play balance</h2>
               </div>
             </div>
 
+            <!-- Vault Display -->
+            <div class="vault-display" id="vault-display">
+              <div class="vault-stat">
+                <span class="vault-stat__label">Vault (TDA)</span>
+                <strong class="vault-stat__value" id="vault-tda">R0</strong>
+              </div>
+              <div class="vault-stat">
+                <span class="vault-stat__label">Play Balance</span>
+                <strong class="vault-stat__value" id="vault-play-balance">R0</strong>
+              </div>
+              <div class="vault-stat" id="vault-class-info">
+                <span class="vault-stat__label">Class</span>
+                <strong class="vault-stat__value" id="vault-class">-</strong>
+              </div>
+            </div>
+
+            <!-- Step 1: Add to Vault (TDA) -->
             <label class="field">
-              <span>Deposit amount</span>
+              <span>Add to Vault</span>
               <div class="field__row">
                 <input id="deposit-input" type="number" min="1" step="1" value="200" />
-                <button id="deposit-button" class="button button--soft" type="button">Add funds</button>
+                <button id="deposit-button" class="button button--soft" type="button">Add to Vault</button>
               </div>
-              <small class="field__hint">You cannot deposit or bet above your current mode cap.</small>
+              <small class="field__hint">Funds go to your Vault (TDA). Then transfer to Play Balance below.</small>
             </label>
+
+            <!-- Step 2: Deposit to Play Balance -->
+            <label class="field">
+              <span>Deposit to Play</span>
+              <div class="field__row">
+                <input id="deposit-to-play-input" type="number" min="1" step="1" value="100" />
+                <button id="deposit-to-play-button" class="button button--primary" type="button">Deposit to Play</button>
+              </div>
+              <small class="field__hint" id="deposit-to-play-hint">Move funds from Vault to Play Balance for betting.</small>
+            </label>
+
+            <!-- Recharge Button (Easy/Medium only) -->
+            <div class="recharge-section" id="recharge-section" style="display: none;">
+              <button id="recharge-button" class="button button--soft button--block" type="button" disabled>
+                Recharge Vault
+              </button>
+              <small class="field__hint" id="recharge-hint">Available after cooldown when TDA hits floor.</small>
+            </div>
 
             <div class="stepper-group">
               <div class="stepper-labels">
@@ -228,7 +263,7 @@
             <!-- Easy Mode Cap Warning -->
             <div class="easy-cap-warning" id="easy-cap-warning" style="display: none;">
               <span class="easy-cap-warning__icon">⚠️</span>
-              <span>Easy Mode has a balance cap of <strong id="easy-cap-amount">R100,000</strong>. Deposits beyond this limit will be rejected.</span>
+              <span>Easy Mode has a deposit cap of <strong id="easy-cap-amount">R1,000</strong> per transfer.</span>
             </div>
           </section>
         </aside>
@@ -240,9 +275,9 @@
         <div class="difficulty-card__header">
           <div>
             <p class="panel__eyebrow" id="difficulty-eyebrow">Choose your class</p>
-            <h2 id="difficulty-title">Pick your difficulty</h2>
+            <h2 id="difficulty-title">Pick your class</h2>
             <p class="panel__subtext" id="difficulty-copy">
-              Choose the mode that drives your deposit cap, odds, and leaderboard class.
+              Each class has different starting TDA, odds, deposit caps, and risk/reward profiles.
             </p>
           </div>
           <button id="difficulty-close-button" class="button button--ghost difficulty-close is-hidden" type="button">Close</button>

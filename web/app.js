@@ -11,7 +11,7 @@ const difficultyCloseButtonEl = document.getElementById("difficulty-close-button
 const balanceEl = document.getElementById("balance");
 const spinTotalEl = document.getElementById("spin-total");
 const difficultyLabelEl = document.getElementById("difficulty-label");
-const depositCapEl = document.getElementById("deposit-cap");
+const tdaTotalEl = document.getElementById("tda-total");
 const aOddsEl = document.getElementById("a-odds");
 const winRatioEl = document.getElementById("win-ratio");
 const lastWinEl = document.getElementById("last-win");
@@ -42,6 +42,17 @@ const turboToggleEl = document.getElementById("turbo-toggle");
 const easyCapWarningEl = document.getElementById("easy-cap-warning");
 const easyCapAmountEl = document.getElementById("easy-cap-amount");
 
+// Vault (TDA) Elements
+const vaultTdaEl = document.getElementById("vault-tda");
+const vaultPlayBalanceEl = document.getElementById("vault-play-balance");
+const vaultClassEl = document.getElementById("vault-class");
+const depositToPlayInput = document.getElementById("deposit-to-play-input");
+const depositToPlayButton = document.getElementById("deposit-to-play-button");
+const depositToPlayHint = document.getElementById("deposit-to-play-hint");
+const rechargeSection = document.getElementById("recharge-section");
+const rechargeButton = document.getElementById("recharge-button");
+const rechargeHint = document.getElementById("recharge-hint");
+
 // Session Stats Elements
 const sessionWonEl = document.getElementById("session-won");
 const luckiestSpinEl = document.getElementById("luckiest-spin");
@@ -62,6 +73,7 @@ const state = {
   authMode: "login",
   authenticated: false,
   user: null,
+  tda: null,
   bet: 10,
   reels: [],
   isSpinning: false,
@@ -317,18 +329,92 @@ function sleep(ms) {
 }
 
 // ================================
-// EASY MODE CAP WARNING
+// VAULT / TDA FUNCTIONS
 // ================================
 
 function updateEasyCapWarning() {
-  const isEasyMode = state.user?.difficulty === "easy";
-  const easyCap = 100000; // R100,000 cap for Easy mode
-  
-  if (isEasyMode) {
+  const selectedClass = state.user?.selectedClass || state.user?.difficulty;
+  const isEasyMode = selectedClass === "easy";
+  const depositCap = state.user?.depositCap;
+
+  if (isEasyMode && depositCap != null) {
     easyCapWarningEl.style.display = "flex";
-    easyCapAmountEl.textContent = currency(easyCap);
+    easyCapAmountEl.textContent = currency(depositCap);
   } else {
     easyCapWarningEl.style.display = "none";
+  }
+}
+
+function updateRechargeUI() {
+  if (!rechargeSection) return;
+  const selectedClass = state.user?.selectedClass || state.user?.difficulty;
+  const classConfig = state.user?.classConfig;
+
+  if (!classConfig || !classConfig.bankruptcy_protection) {
+    rechargeSection.style.display = "none";
+    return;
+  }
+
+  rechargeSection.style.display = "block";
+  const rechargeAt = state.tda?.rechargeAvailableAt;
+  const tda = state.tda?.total ?? 0;
+  const floor = classConfig.min_tda_floor ?? 10;
+
+  if (tda > floor) {
+    rechargeButton.disabled = true;
+    rechargeHint.textContent = "Vault is above bankruptcy threshold. No recharge needed.";
+  } else if (rechargeAt) {
+    const rechargeDate = new Date(rechargeAt);
+    const now = new Date();
+    if (now < rechargeDate) {
+      rechargeButton.disabled = true;
+      const hours = Math.ceil((rechargeDate - now) / (1000 * 60 * 60));
+      rechargeHint.textContent = `Recharge available in ~${hours}h (${rechargeDate.toLocaleString()})`;
+    } else {
+      rechargeButton.disabled = false;
+      rechargeHint.textContent = "Recharge available! Click to restore your Vault.";
+    }
+  } else {
+    rechargeButton.disabled = false;
+    rechargeHint.textContent = "Recharge available. Click to restore your Vault.";
+  }
+}
+
+async function depositToPlay() {
+  if (!state.authenticated || state.needsDifficultySelection) return;
+  const amount = Number.parseFloat(depositToPlayInput?.value);
+  if (isNaN(amount) || amount <= 0) {
+    statusPillEl.textContent = "Enter a valid amount to deposit to play balance.";
+    return;
+  }
+  try {
+    const data = await requestJson("/api/deposit-to-play", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    });
+    applySnapshot(data);
+    if (depositToPlayInput) depositToPlayInput.value = "";
+    statusPillEl.textContent = `Moved ${currency(amount)} from Vault to Play Balance.`;
+  } catch (error) {
+    statusPillEl.textContent = error.message;
+  }
+}
+
+async function recharge() {
+  if (!state.authenticated) return;
+  try {
+    const data = await requestJson("/api/recharge", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    applySnapshot(data);
+    if (data.rechargeResult) {
+      statusPillEl.textContent = `Vault recharged to ${currency(data.rechargeResult.new_tda)}!`;
+    } else {
+      statusPillEl.textContent = "Vault recharged!";
+    }
+  } catch (error) {
+    statusPillEl.textContent = error.message;
   }
 }
 
@@ -351,45 +437,63 @@ function renderAccount() {
 
   if (isAuthenticated) {
     usernameDisplayEl.textContent = state.user.displayName || state.user.username;
-    modeDisplayEl.textContent = state.user.difficultyLabel;
+    modeDisplayEl.textContent = state.user.classLabel || state.user.difficultyLabel || "Unset";
     topTenDisplayEl.textContent = state.user.isTopTen ? "Unlocked" : "Locked";
-    chooseModeButtonEl.textContent = state.user.difficulty ? "Change mode" : "Select mode";
-    modeResetHintEl.textContent = state.user.difficulty
-      ? "Changing mode wipes your current run history, balance, and leaderboard score."
-      : "Pick a mode before you deposit or spin.";
+    const hasMode = state.user.selectedClass || state.user.difficulty;
+    chooseModeButtonEl.textContent = hasMode ? "Change class" : "Select class";
+    modeResetHintEl.textContent = hasMode
+      ? "Changing class resets your Vault (TDA), play balance, run history, and leaderboard score."
+      : "Pick a class before you deposit or spin.";
   }
 }
 
 function updateControls() {
-  const balance = state.user?.balance ?? 0;
-  const cap = state.user?.maxDepositLimit ?? 0;
-  const maxBetPerLine = Math.max(1, Math.floor(Math.min(balance, cap) / 3));
+  const playBalance = state.user?.balance ?? 0;
+  const tda = state.tda?.total ?? 0;
+  const depositCap = state.user?.depositCap;
+  const maxBetPerLine = Math.max(1, Math.floor(playBalance / 3));
   state.bet = clamp(state.bet, 1, maxBetPerLine || 1);
   betValueEl.textContent = state.bet;
   betTextInputEl.value = state.bet;
   betTextInputEl.max = maxBetPerLine || 1;
 
-  balanceEl.textContent = currency(balance);
+  // Stats grid
+  balanceEl.textContent = currency(playBalance);
   spinTotalEl.textContent = currency(state.bet * 3);
-  difficultyLabelEl.textContent = state.user?.difficultyLabel ?? "Unset";
-  depositCapEl.textContent = currency(cap);
+  difficultyLabelEl.textContent = state.user?.classLabel ?? state.user?.difficultyLabel ?? "Unset";
+  if (tdaTotalEl) tdaTotalEl.textContent = currency(tda);
   aOddsEl.textContent = state.user?.aOddsText ?? "Choose mode";
   winRatioEl.textContent = percent(state.user?.hitRate ?? 0);
-  depositInput.max = String(cap || 0);
+
+  // Vault display
+  if (vaultTdaEl) vaultTdaEl.textContent = currency(tda);
+  if (vaultPlayBalanceEl) vaultPlayBalanceEl.textContent = currency(playBalance);
+  if (vaultClassEl) vaultClassEl.textContent = state.user?.classLabel ?? "-";
+
+  // Deposit to play hint
+  if (depositToPlayHint) {
+    const capText = depositCap != null ? ` (cap: ${currency(depositCap)}/transfer)` : " (no cap)";
+    depositToPlayHint.textContent = `Vault: ${currency(tda)} available${capText}`;
+  }
+
+  // Recharge section
+  updateRechargeUI();
 
   const canSpin =
     state.authenticated &&
     !state.needsDifficultySelection &&
     !state.isSpinning &&
     !state.autoSpin.enabled &&
-    balance >= state.bet * 3 &&
-    state.bet * 3 <= cap;
+    playBalance >= state.bet * 3;
 
   spinButton.disabled = !canSpin;
   depositButton.disabled = !state.authenticated || state.needsDifficultySelection;
   depositInput.disabled = !state.authenticated || state.needsDifficultySelection;
   betTextInputEl.disabled = !state.authenticated || state.needsDifficultySelection;
-  
+  if (depositToPlayButton) {
+    depositToPlayButton.disabled = !state.authenticated || state.needsDifficultySelection || tda <= 0;
+  }
+
   // Update easy cap warning
   updateEasyCapWarning();
 }
@@ -495,45 +599,53 @@ function renderDifficultyChooser() {
     return;
   }
 
-  const currentMode = state.user?.difficulty || "";
-  const currentModeLabel = state.user?.difficultyLabel || "Unset";
+  const currentMode = state.user?.selectedClass || state.user?.difficulty || "";
+  const currentModeLabel = state.user?.classLabel || state.user?.difficultyLabel || "Unset";
   const isChanging = Boolean(currentMode);
   difficultyEyebrowEl.textContent = isChanging ? "Switch class" : "Choose your class";
-  difficultyTitleEl.textContent = isChanging ? "Change your difficulty" : "Pick your difficulty";
+  difficultyTitleEl.textContent = isChanging ? "Change your class" : "Pick your class";
   difficultyCopyEl.textContent = isChanging
-    ? `Your current class is ${currentModeLabel}. Switching to another mode resets that run's balance, deposit score, and leaderboard history.`
-    : "Choose the mode that drives your deposit cap, odds, and leaderboard class.";
+    ? `Your current class is ${currentModeLabel}. Switching to another class resets your Vault (TDA), play balance, run history, and leaderboard score.`
+    : "Each class has different starting TDA, odds, deposit caps, and risk/reward profiles.";
 
   for (const option of state.difficultyOptions) {
     const card = document.createElement("button");
     card.type = "button";
-    card.className = `difficulty-option ${currentMode === option.id ? "is-active" : ""}`;
+    const isActive = currentMode === option.id;
+    card.className = `difficulty-option ${isActive ? "is-active" : ""}`;
+    
+    const multiText = option.profitMultiplier > 1.0 ? `+${((option.profitMultiplier - 1.0) * 100).toFixed(0)}% profit` : "1:1 profit";
+    const protectText = option.bankruptcyProtection ? "Protected" : "Game Over at R0";
+    const capText = option.depositCap != null ? `Deposit cap ${currency(option.depositCap)}` : "No deposit cap";
+    
     card.innerHTML = `
-      <strong>${option.label}</strong>
-      <span>Starting cap ${currency(option.startingLimit)}</span>
-      <small>${currentMode === option.id ? "Current mode" : `A odds 1 in ${option.aDenominator}`}</small>
+      <strong>${option.name}</strong>
+      <span>Starting TDA: ${currency(option.startingTda)}</span>
+      <small>${multiText} · ${protectText}</small>
+      <small>${capText}</small>
+      ${isActive ? '<small class="is-active-label">Current class</small>' : ''}
     `;
     card.addEventListener("click", async () => {
-      if (currentMode === option.id) {
+      if (isActive) {
         state.modeChooserOpen = false;
         renderDifficultyChooser();
-        statusPillEl.textContent = `${option.label} mode is already active.`;
+        statusPillEl.textContent = `${option.name} class is already active.`;
         return;
       }
 
       if (
         currentMode &&
         !window.confirm(
-          `Switch to ${option.label} mode? This will delete your current ${currentModeLabel} run history, reset your balance to R0, and clear its leaderboard progress.`
+          `Switch to ${option.name} class? This will reset your Vault (TDA), play balance, run history, and leaderboard score.`
         )
       ) {
         return;
       }
 
       try {
-        const payload = await requestJson("/api/select-difficulty", {
+        const payload = await requestJson("/api/select-class", {
           method: "POST",
-          body: JSON.stringify({ difficulty: option.id }),
+          body: JSON.stringify({ class: option.id }),
         });
         state.modeChooserOpen = false;
         applySnapshot(payload);
@@ -550,7 +662,8 @@ function renderDifficultyChooser() {
 function applySnapshot(data) {
   state.authenticated = data.authenticated;
   state.user = data.user;
-  state.difficultyOptions = data.difficultyOptions || [];
+  state.tda = data.tda || null;
+  state.difficultyOptions = data.classOptions || data.difficultyOptions || [];
   state.needsDifficultySelection = data.needsDifficultySelection;
   if (!state.needsDifficultySelection) {
     state.modeChooserOpen = false;
@@ -722,6 +835,8 @@ logoutButtonEl.addEventListener("click", logout);
 chooseModeButtonEl.addEventListener("click", openModeChooser);
 depositButton.addEventListener("click", deposit);
 spinButton.addEventListener("click", spin);
+if (depositToPlayButton) depositToPlayButton.addEventListener("click", depositToPlay);
+if (rechargeButton) rechargeButton.addEventListener("click", recharge);
 difficultyCloseButtonEl.addEventListener("click", () => {
   state.modeChooserOpen = false;
   renderDifficultyChooser();

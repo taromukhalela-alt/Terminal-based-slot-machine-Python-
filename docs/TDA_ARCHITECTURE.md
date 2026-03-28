@@ -15,7 +15,7 @@ The TDA economy system is a new economy model for the Pixel Slot game that provi
 - **Profit Multiplier**: 1.0 (1:1 profit)
 - **Bankruptcy Protection**: Yes (R10 minimum floor)
 - **Recharge Cooldown**: 24 hours
-- **A-Denominator**: 1,000 (very favorable odds)
+- **A-Denominator**: 200 (very favorable odds)
 - **Deposit Cap**: R1,000 per transfer
 
 ### Medium Mode
@@ -23,7 +23,7 @@ The TDA economy system is a new economy model for the Pixel Slot game that provi
 - **Profit Multiplier**: 1.02 (+2% bonus on net profits)
 - **Bankruptcy Protection**: Yes (R10 minimum floor)
 - **Recharge Cooldown**: 48 hours
-- **A-Denominator**: 200 (moderate odds)
+- **A-Denominator**: 500 (moderate odds)
 - **Deposit Cap**: R500 per transfer
 
 ### Hard Mode
@@ -31,7 +31,7 @@ The TDA economy system is a new economy model for the Pixel Slot game that provi
 - **Profit Multiplier**: 1.0 (1:1 profit)
 - **Bankruptcy Protection**: No (can reach R0)
 - **Recharge Cooldown**: None (no recharge available)
-- **A-Denominator**: 50 (moderate odds, better than before)
+- **A-Denominator**: 1000 (moderate odds, better than before)
 - **Deposit Cap**: None (unlimited transfers)
 
 ## Core Concepts

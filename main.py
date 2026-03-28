@@ -6,7 +6,7 @@ import os
 import random
 import secrets
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, session
@@ -55,7 +55,7 @@ CLASS_CONFIG = {
         "min_tda_floor": 10.0,
         "recharge_cooldown_hours": 48,
         "a_denominator": 200.0,
-        "deposit_cap": None,  # Can move up to R500 to play balance
+        "deposit_cap": 500.0,  # Can move up to R500 to play balance
     },
     "hard": {
         "name": "Hard",
@@ -798,13 +798,16 @@ class SlotStore:
             LIMIT %s
         """
         params.append(limit)
-        rows = self.conn.execute(sql, params).fetchall()
+        rows = self.conn.execute(sql, tuple(params)).fetchall()
         results = []
         for index, row in enumerate(rows, start=1):
             lucky_ratio = round(row["lucky_ratio"] or 0, 4)
+            unlucky_ratio = round(1 - lucky_ratio, 4)
             # Use TDA as primary, fallback to total_deposit for legacy users
             tda = row["total_depositable_amount"] or row["total_deposit"]
             class_mode = row["selected_class"] or row.get("difficulty_mode", "easy")
+            # Score = TDA + lucky_ratio (same formula as legacy score_from_values)
+            score = round(tda + lucky_ratio, 4)
             results.append(
                 {
                     "rank": index,
@@ -813,8 +816,12 @@ class SlotStore:
                     "displayName": row["display_name"],
                     "class": class_mode,
                     "classLabel": CLASS_CONFIG[class_mode]["name"] if class_mode in CLASS_CONFIG else class_mode.title(),
+                    "difficultyLabel": CLASS_CONFIG[class_mode]["name"] if class_mode in CLASS_CONFIG else class_mode.title(),
                     "tda": round(tda, 2),
+                    "totalDeposit": round(tda, 2),
                     "luckyRatio": lucky_ratio,
+                    "unluckyRatio": unlucky_ratio,
+                    "score": score,
                     "totalWins": row["total_wins"],
                     "totalGames": row["total_games"],
                 }
@@ -1348,79 +1355,6 @@ class SlotStore:
                 'play_balance': play_before + amount,
             }
 
-    def select_class(self, user_id, class_mode):
-        """
-        Select or change class. Resets progress if changing classes.
-        """
-        if class_mode not in CLASS_CONFIG:
-            raise ValueError(f"Invalid class: {class_mode}")
-        
-        with self.lock, self.conn:
-            row = self._user_row(user_id)
-            
-            # Check if already has a class
-            if row['selected_class'] and row['selected_class'] != class_mode:
-                # Class change = reset
-                config = CLASS_CONFIG[class_mode]
-                
-                self.conn.execute(
-                    """
-                    UPDATE users
-                    SET selected_class = %s,
-                        total_depositable_amount = %s,
-                        play_balance = 0,
-                        total_games = 0,
-                        total_wins = 0,
-                        win_streak = 0,
-                        status = %s
-                    WHERE id = %s
-                    """,
-                    (
-                        class_mode, 
-                        config['starting_tda'],
-                        f"Started {config['name']} class with R{config['starting_tda']:.2f} TDA",
-                        user_id
-                    )
-                )
-                
-                return {
-                    'class': class_mode,
-                    'starting_tda': config['starting_tda'],
-                    'reset': True,
-                }
-            
-            # First time selection
-            config = CLASS_CONFIG[class_mode]
-            
-            # If user has no TDA yet, initialize it
-            current_tda = row['total_depositable_amount']
-            if current_tda <= 0:
-                current_tda = config['starting_tda']
-            
-            self.conn.execute(
-                """
-                UPDATE users
-                SET selected_class = %s,
-                    total_depositable_amount = %s,
-                    current_a_denominator = %s,
-                    status = %s
-                WHERE id = %s
-                """,
-                (
-                    class_mode,
-                    current_tda,
-                    config['a_denominator'],
-                    f"Selected {config['name']} class",
-                    user_id
-                )
-            )
-            
-            return {
-                'class': class_mode,
-                'starting_tda': current_tda,
-                'reset': False,
-            }
-
     def recharge_tda(self, user_id):
         """
         Recharge TDA for Easy/Medium mode users who hit bankruptcy.
@@ -1676,12 +1610,13 @@ class SlotStore:
         class_rank = self._class_rank(row["id"], selected_class)
         cosmetics = self._cosmetics(row, global_rank, class_rank)
         effective = self._effective_cosmetics(row, cosmetics)
-        
+
         # TDA stats
         tda = row.get("total_depositable_amount") or 0
         play_balance = row.get("play_balance") or 0
         recharge_available_at = row.get("tda_recharge_available_at")
-        
+        class_config = CLASS_CONFIG.get(selected_class, CLASS_CONFIG["easy"])
+
         return {
             "authenticated": True,
             "needsClassSelection": not bool(selected_class),
@@ -1692,6 +1627,7 @@ class SlotStore:
                     "startingTda": config["starting_tda"],
                     "profitMultiplier": config["profit_multiplier"],
                     "bankruptcyProtection": config["bankruptcy_protection"],
+                    "depositCap": config["deposit_cap"],
                 }
                 for mode, config in CLASS_CONFIG.items()
             ],
@@ -1700,9 +1636,10 @@ class SlotStore:
                 "username": row["username"],
                 "displayName": row["display_name"] or row["username"],
                 "selectedClass": selected_class,
-                "classLabel": CLASS_CONFIG[selected_class]["name"] if selected_class in CLASS_CONFIG else selected_class.title(),
-                "classConfig": CLASS_CONFIG[selected_class] if selected_class in CLASS_CONFIG else None,
-                "balance": round(row["balance"], 2),
+                "classLabel": class_config["name"],
+                "classConfig": class_config,
+                # Play balance is the betting balance in TDA system
+                "balance": round(play_balance, 2),
                 "totalDeposit": round(row["total_deposit"], 2),
                 "maxDepositLimit": round(row["max_deposit_limit"], 2),
                 "aOddsText": f"1 in {denominator:.2f}" if denominator else "Choose a mode",
@@ -1720,8 +1657,10 @@ class SlotStore:
                 "prestigePoints": round(row["prestige_points"], 2),
                 "totalPP": round(row["total_pp_earned"], 2),
                 "inventory": json.loads(row["inventory"] or "{}"),
+                "depositCap": class_config["deposit_cap"],
             },
-            "balance": round(row["balance"], 2),
+            # Top-level balance = play_balance (what you can bet with)
+            "balance": round(play_balance, 2),
             "lastSpin": json.loads(row["last_spin"]),
             "lastWin": round(row["last_win"], 2),
             "lastNet": round(row["last_net"], 2),
@@ -1756,6 +1695,7 @@ class SlotStore:
                     "startingTda": config["starting_tda"],
                     "profitMultiplier": config["profit_multiplier"],
                     "bankruptcyProtection": config["bankruptcy_protection"],
+                    "depositCap": config["deposit_cap"],
                 }
                 for mode, config in CLASS_CONFIG.items()
             ],
@@ -1873,7 +1813,7 @@ class SlotStore:
                     class_name,
                     class_name,  # Also set difficulty_mode for legacy
                     config["starting_tda"],
-                    config["starting_tda"],  # play_balance starts same as TDA
+                    0,  # play_balance starts at 0; user deposits from TDA
                     None,  # No cooldown on first selection
                     config["starting_tda"] * 10,  # Max deposit 10x starting TDA
                     config["a_denominator"],
@@ -1889,12 +1829,12 @@ class SlotStore:
         return snapshot
 
     def add_funds(self, user_id, amount):
-        """Deposit funds into the user's account.
-        
-        In the TDA system:
-        - Funds go to play_balance for betting
-        - Deposits count towards total_deposit for leaderboard
-        - The amount is also deposited to TDA via deposit_to_play()
+        """Deposit funds into the user's TDA.
+
+        Per TDA architecture:
+        - Funds go directly to TDA (total_depositable_amount)
+        - Deposits count towards total_deposit for leaderboard scoring
+        - User then separately calls deposit_to_play() to move funds to play balance
         """
         if amount <= 0:
             raise ValueError("Deposit amount must be greater than zero.")
@@ -1903,27 +1843,27 @@ class SlotStore:
             row = self._user_row(user_id)
             if not row:
                 raise ValueError("User not found.")
-            
+
             # Check class selection
             selected_class = row.get("selected_class") or row.get("difficulty_mode")
             if not selected_class:
                 raise ValueError("Choose a class before depositing.")
-            
-            # Check deposit limit (10x TDA)
+
+            # Check deposit limit
             max_deposit_limit = row.get("max_deposit_limit", 10000)
             if amount > max_deposit_limit:
                 raise ValueError(
                     f"Deposit amount cannot exceed your current limit of R{max_deposit_limit:.2f}."
                 )
-            
+
             new_total_deposits = row["total_deposits_count"] + 1
             new_max_balance = max(row["max_balance"], amount)
-            
-            # Update balance and deposit stats
+
+            # Deposit goes to TDA only — user transfers to play_balance separately
             self.conn.execute(
                 """
                 UPDATE users
-                SET balance = balance + %s,
+                SET total_depositable_amount = total_depositable_amount + %s,
                     total_deposit = total_deposit + %s,
                     prestige_points = prestige_points + %s,
                     total_pp_earned = total_pp_earned + %s,
@@ -1932,12 +1872,10 @@ class SlotStore:
                     status = %s
                 WHERE id = %s
                 """,
-                (amount, amount, pp_earned, pp_earned, new_total_deposits, new_max_balance, f"Added R{amount:.2f}. +{pp_earned:.1f} PP earned!", user_id),
+                (amount, amount, pp_earned, pp_earned, new_total_deposits, new_max_balance,
+                 f"Deposited R{amount:.2f} to your Vault. +{pp_earned:.1f} PP earned! Use 'Deposit to Play' to move funds.", user_id),
             )
-            
-            # Also update TDA via deposit_to_play()
-            self.deposit_to_play(user_id, amount)
-            
+
             updated = self._user_row(user_id)
         return self._snapshot(updated)
 
@@ -2404,6 +2342,39 @@ def api_deposit():
     payload = request.get_json(force=True)
     snapshot = store.add_funds(user_id, float(payload.get("amount", 0)))
     return jsonify(snapshot)
+
+
+@app.post("/api/deposit-to-play")
+def api_deposit_to_play():
+    """Transfer funds from TDA to play balance."""
+    user_id = require_user()
+    if not user_id:
+        return jsonify({"error": "You need to sign in before using this feature."}), 401
+    payload = request.get_json(force=True)
+    amount = float(payload.get("amount", 0))
+    try:
+        result = store.deposit_to_play(user_id, amount)
+        # Return updated snapshot
+        snapshot = store.current_user(user_id)
+        snapshot["depositResult"] = result
+        return jsonify(snapshot)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.post("/api/recharge")
+def api_recharge():
+    """Recharge TDA for Easy/Medium mode users after cooldown."""
+    user_id = require_user()
+    if not user_id:
+        return jsonify({"error": "You need to sign in before using this feature."}), 401
+    try:
+        result = store.recharge_tda(user_id)
+        snapshot = store.current_user(user_id)
+        snapshot["rechargeResult"] = result
+        return jsonify(snapshot)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @app.post("/api/spin")
